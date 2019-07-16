@@ -123,13 +123,19 @@ def encoder(x, means, covs, p, gamma):
         layer_1_miss = tf.cond(tf.equal(tf.constant(i), tf.constant(0)), lambda: tf.add(layer_1_miss, layer_1_m),
                                lambda: tf.concat((layer_1_miss, layer_1_m), axis=0))
 
+
+        print("Data miss", data_miss.get_shape())
+
         norm = tf.subtract(data_miss, means[i, :])
         norm = tf.square(norm)
         q = tf.where(where_isfinite,
                      tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [size[0]]), [-1, size[1]]),
                      tf.ones_like(x_miss))
+
+        print("Prev q", q.get_shape())
         norm = tf.div(norm, q)
         norm = tf.reduce_sum(norm, axis=1)
+        print('Norm', norm.get_shape())
 
         q = tf.log(q)
         q = tf.reduce_sum(q, axis=1)
@@ -141,6 +147,7 @@ def encoder(x, means, covs, p, gamma):
 
         q = tf.add(q, norm)
         q = tf.multiply(q, -0.5)
+        print("q", q.get_shape())
 
         Q = tf.concat((Q, q), axis=0)
 
@@ -151,6 +158,8 @@ def encoder(x, means, covs, p, gamma):
     Q = tf.exp(Q)
     Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
     Q = tf.reshape(Q, shape=(-1, 1))
+
+    print("Q", Q.get_shape())
 
     layer_1_miss = tf.multiply(layer_1_miss, Q)
     layer_1_miss = tf.reshape(layer_1_miss, shape=(n_distribution, size[0], num_hidden_1))
@@ -241,7 +250,8 @@ init = tf.global_variables_initializer()
 
 with tf.Session() as sess:
     sess.run(init)  # run the initializer
-
+    loss_k = 0
+    epoch_number = tf.constant(n_epochs)
     for epoch in range(1, n_epochs + 1):
         n_batches = data_train.shape[0] // batch_size
         l = np.inf
@@ -255,6 +265,12 @@ with tf.Session() as sess:
             _, l = sess.run([optimizer, loss], feed_dict={X: batch_x})
         # Display loss per step
         print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, gamma.eval()[0]))
+        loss_k += l
+
+    print(loss_k/250)
+
+
+
 
     # results for test data_rbfn
     for i in range(10):

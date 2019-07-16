@@ -4,6 +4,7 @@ import sys
 from time import time
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import matplotlib.pyplot as plt
@@ -16,7 +17,6 @@ from tensorflow.examples.tutorials.mnist import input_data
 import tensorflow_probability as tfp
 
 tfd = tfp.distributions
-
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -44,6 +44,7 @@ pathlib.Path(os.path.join(save_dir, 'images_png')).mkdir(parents=True, exist_ok=
 
 # tf Graph input (only pictures)
 X = tf.placeholder("float", [None, num_input])
+
 
 initializer = tf.contrib.layers.variance_scaling_initializer()
 
@@ -98,50 +99,97 @@ def random_from_component(mu, sigma):
     return mvn.sample(1)
 
 
-def random_one_sample(p, x_miss):
+def get_distibution_params(component, x_miss, means, covs):
     where_isnan = tf.is_nan(x_miss)
-    where_isfinite = tf.is_finite(x_miss)
     size = tf.shape(x_miss)
-    component = random_component(p)
     data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[component, :], [size[0]]), [-1, size[1]]), x_miss)
     miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[component, :], [size[0]]), [-1, size[1]]),
                         tf.zeros([size[0], size[1]]))
-    return random_from_component(data_miss, miss_cov)
+
+    return data_miss, miss_cov
 
 
-def random_samples(num_samples, p, x_miss):
-    where_isnan = tf.is_nan(x_miss)
-    where_isfinite = tf.is_finite(x_miss)
+def create_data(num_sample, p, x_miss, means, covs, gamma):
     size = tf.shape(x_miss)
-    samples = random_one_sample(p, x_miss)
-    for i in range(num_samples-1):
+    samples = tf.zeros([num_sample, size[0], num_input])
+    Q = tf.zeros([size[0]])
+    for i in range(num_sample):
         component = random_component(p)
-        data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[component, :], [size[0]]), [-1, size[1]]), x_miss)
-        miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[component, :], [size[0]]), [-1, size[1]]),
-                            tf.zeros([size[0], size[1]]))
-        samples = tf.concat(samples, random_from_component(data_miss, miss_cov))
+        mu, sigma = get_distibution_params(component, x_miss, means, covs)
+        sample = random_from_component(mu, sigma)
+        samples = tf.cond(tf.equal(tf.constant(i), tf.constant(0)), lambda: tf.add(samples, sample),
+                               lambda: tf.concat((samples, sample), axis=0))
+        print("Sample", sample.get_shape())
+        q = get_q(tf.reshape(sample, (size[0], num_input)), x_miss, covs, gamma, means, component)
+        print("Q", q.get_shape())
+        Q = tf.cond(tf.equal(tf.constant(i), tf.constant(0)), lambda: tf.add(Q, q),
+                               lambda: tf.concat((Q, q), axis=0))
+        prepare_Q(Q, num_sample)
 
-    return samples
+
+    return samples, Q
 
 
-def return_layer(output, size):
-    reshaped_output = tf.reshape(output, shape=(size[0] * size[1], num_input))
-    layer_1_m = tf.add(tf.matmul(reshaped_output, weights['encoder_h1']), biases['encoder_b1'])
+def get_q(output, x_miss, covs, gamma, means, component):
+    size = tf.shape(x_miss)
+    print('Output', output.get_shape())
+
+    where_isfinite = tf.is_finite(x_miss)
+    norm = tf.subtract(output, means[component, :])
+    norm = tf.square(norm)
+    q = tf.where(where_isfinite,
+                 tf.reshape(tf.tile(tf.add(gamma, covs[component, :]), [size[0]]), [-1, size[1]]),
+                 tf.ones_like(x_miss))
+    norm = tf.div(norm, q)
+    norm = tf.reduce_sum(norm, axis=1)
+    print("Norm", norm.get_shape())
+
+    print("prev", q.get_shape())
+
+    q = tf.log(q)
+    q = tf.reduce_sum(q, axis=1)
+
+    q = tf.add(q, norm)
+
+    norm = tf.cast(tf.reduce_sum(tf.cast(where_isfinite, tf.int32), axis=1), tf.float32)
+    norm = tf.multiply(norm, tf.log(2 * np.pi))
+
+    q = tf.add(q, norm)
+    q = tf.multiply(q, -0.5)
+
+    return q
+
+
+def prepare_Q(Q, num_sample):
+    Q = tf.reshape(Q, shape=(num_sample, -1))
+    Q = tf.add(Q, tf.log(p))
+    Q = tf.subtract(Q, tf.reduce_max(Q, axis=0))
+    Q = tf.where(Q < -20, tf.multiply(tf.ones_like(Q), -20), Q)
+    Q = tf.exp(Q)
+    Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
+    Q = tf.reshape(Q, shape=(-1, 1))
+
+    return Q
+
+
+def nr(output, size, num_sample, Q):
+    print("nr 1", output.get_shape())
+    reshaped_output = tf.reshape(output, shape=(size[0] * num_sample, num_input))
+    print("alo")
+    layer_1_m = tf.multiply(reshaped_output)
+    layer_1_m = tf.add(tf.matmul(layer_1_m, weights['encoder_h1']), biases['encoder_b1'])
     layer_1_m = tf.nn.relu(layer_1_m)
-    unreshaped = tf.reshape(layer_1_m, shape=(size[0], size[1], num_input))
+    print("layer_1_m", layer_1_m.get_shape())
+    unreshaped = tf.reshape(layer_1_m, shape=(num_sample, size[0], num_hidden_1))
     mean = tf.reduce_mean(unreshaped, 0)
     return mean
 
 
-
-
-# Building the encoder
 def encoder(x, means, covs, p, gamma):
     gamma = tf.abs(gamma)
     gamma_ = tf.cond(tf.less(gamma[0], 1.), lambda: gamma, lambda: tf.pow(gamma, 2))
     covs = tf.abs(covs)
     p = tf.abs(p)
-    p = tf.div(p, tf.reduce_sum(p, axis=0))
     p_ = tf.nn.softmax(p)
 
     check_isnan = tf.is_nan(x)
@@ -153,19 +201,13 @@ def encoder(x, means, covs, p, gamma):
     # data without missing
     layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
 
-    # data  with missing
-
-    weights2 = tf.square(weights['encoder_h1'])
     size = tf.shape(x_miss)
-    output = random_one_sample(p_,x_miss)
-    layer_1_miss = return_layer(output, size)
-    print(layer_1_miss.get_shape())
-    print(layer_1.get_shape())
-    #
-    # # join layer for data_rbfn with missing values with layer for data_rbfn without missing values
+    samples, Q = create_data(1, p_, x_miss, means, covs, gamma_)
+    layer_1_miss = nr(samples, size, 1, Q)
+    layer_1_miss = tf.reshape(layer_1_miss, shape=(size[1], num_hidden_1))
+
     layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
-    #
-    # # Encoder Hidden layer with sigmoid activation
+
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
     return layer_3
@@ -247,7 +289,7 @@ init = tf.global_variables_initializer()
 
 with tf.Session() as sess:
     sess.run(init)  # run the initializer
-
+    loss_k = 0
     for epoch in range(1, n_epochs + 1):
         n_batches = data_train.shape[0] // batch_size
         l = np.inf
@@ -261,6 +303,9 @@ with tf.Session() as sess:
             _, l = sess.run([optimizer, loss], feed_dict={X: batch_x})
         # Display loss per step
         print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, gamma.eval()[0]))
+        loss_k += l
+
+    print(loss_k / 250)
 
     # results for test data_rbfn
     for i in range(10):
