@@ -3,12 +3,20 @@ import pathlib
 import sys
 from time import time
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import Imputer
 from tensorflow.examples.tutorials.mnist import input_data
+
+import tensorflow_probability as tfp
+
+tfd = tfp.distributions
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -28,7 +36,7 @@ num_input = 784  # MNIST data_rbfn input (img shape: 28*28)
 
 n_distribution = 5  # number of n_distribution
 
-save_dir = "./results_mnist/"
+save_dir = "./results_mnist_sample/"
 width_mask = 13  # size of window mask
 
 pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -79,9 +87,52 @@ def data_with_mask(x, width_window=10):
     return x
 
 
-def nr(w):
-    return tf.div(tf.exp(tf.div(-tf.pow(w, 2), 2.)), np.sqrt(2 * np.pi)) + tf.multiply(tf.div(w, 2.), 1 + tf.erf(
-        tf.div(w, np.sqrt(2))))
+def random_component(p):
+    return tf.squeeze(tf.gather(tf.random.multinomial(p, 1), 0))
+
+
+def random_from_component(mu, sigma):
+    mvn = tfd.MultivariateNormalDiag(
+        loc=mu,
+        scale_diag=sigma)
+    return mvn.sample(1)
+
+
+def random_one_sample(p, x_miss):
+    where_isnan = tf.is_nan(x_miss)
+    where_isfinite = tf.is_finite(x_miss)
+    size = tf.shape(x_miss)
+    component = random_component(p)
+    data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[component, :], [size[0]]), [-1, size[1]]), x_miss)
+    miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[component, :], [size[0]]), [-1, size[1]]),
+                        tf.zeros([size[0], size[1]]))
+    return random_from_component(data_miss, miss_cov)
+
+
+def random_samples(num_samples, p, x_miss):
+    where_isnan = tf.is_nan(x_miss)
+    where_isfinite = tf.is_finite(x_miss)
+    size = tf.shape(x_miss)
+    samples = random_one_sample(p, x_miss)
+    for i in range(num_samples-1):
+        component = random_component(p)
+        data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[component, :], [size[0]]), [-1, size[1]]), x_miss)
+        miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[component, :], [size[0]]), [-1, size[1]]),
+                            tf.zeros([size[0], size[1]]))
+        samples = tf.concat(samples, random_from_component(data_miss, miss_cov))
+
+    return samples
+
+
+def return_layer(output, size):
+    reshaped_output = tf.reshape(output, shape=(size[0] * size[1], num_input))
+    layer_1_m = tf.add(tf.matmul(reshaped_output, weights['encoder_h1']), biases['encoder_b1'])
+    layer_1_m = tf.nn.relu(layer_1_m)
+    unreshaped = tf.reshape(layer_1_m, shape=(size[0], size[1], num_input))
+    mean = tf.reduce_mean(unreshaped, 0)
+    return mean
+
+
 
 
 # Building the encoder
@@ -91,75 +142,30 @@ def encoder(x, means, covs, p, gamma):
     covs = tf.abs(covs)
     p = tf.abs(p)
     p = tf.div(p, tf.reduce_sum(p, axis=0))
+    p_ = tf.nn.softmax(p)
 
     check_isnan = tf.is_nan(x)
     check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
 
-    x_miss = tf.gather(x, tf.reshape(tf.where(check_isnan > 0), [-1]))  # data_rbfn with missing values
-    x = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))  # data_rbfn without missing values
+    x_miss = tf.gather(x, tf.reshape(tf.where(check_isnan > 0), [-1]))  # data with missing values
+    x = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))  # data_without missing values
 
-    # data_rbfn without missing
+    # data without missing
     layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
 
-    # data_rbfn with missing
-    where_isnan = tf.is_nan(x_miss)
-    where_isfinite = tf.is_finite(x_miss)
-    size = tf.shape(x_miss)
+    # data  with missing
 
     weights2 = tf.square(weights['encoder_h1'])
-
-    Q = []
-    layer_1_miss = tf.zeros([size[0], num_hidden_1])
-    for i in range(n_distribution):
-        data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[i, :], [size[0]]), [-1, size[1]]), x_miss)
-        miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[i, :], [size[0]]), [-1, size[1]]),
-                            tf.zeros([size[0], size[1]]))
-
-        layer_1_m = tf.add(tf.matmul(data_miss, weights['encoder_h1']), biases['encoder_b1'])
-
-        layer_1_m = tf.div(layer_1_m, tf.sqrt(tf.matmul(miss_cov, weights2)))
-        layer_1_m = nr(layer_1_m)
-
-        layer_1_miss = tf.cond(tf.equal(tf.constant(i), tf.constant(0)), lambda: tf.add(layer_1_miss, layer_1_m),
-                               lambda: tf.concat((layer_1_miss, layer_1_m), axis=0))
-
-        norm = tf.subtract(data_miss, means[i, :])
-        norm = tf.square(norm)
-        q = tf.where(where_isfinite,
-                     tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [size[0]]), [-1, size[1]]),
-                     tf.ones_like(x_miss))
-        norm = tf.div(norm, q)
-        norm = tf.reduce_sum(norm, axis=1)
-
-        q = tf.log(q)
-        q = tf.reduce_sum(q, axis=1)
-
-        q = tf.add(q, norm)
-
-        norm = tf.cast(tf.reduce_sum(tf.cast(where_isfinite, tf.int32), axis=1), tf.float32)
-        norm = tf.multiply(norm, tf.log(2 * np.pi))
-
-        q = tf.add(q, norm)
-        q = tf.multiply(q, -0.5)
-
-        Q = tf.concat((Q, q), axis=0)
-
-    Q = tf.reshape(Q, shape=(n_distribution, -1))
-    Q = tf.add(Q, tf.log(p))
-    Q = tf.subtract(Q, tf.reduce_max(Q, axis=0))
-    Q = tf.where(Q < -20, tf.multiply(tf.ones_like(Q), -20), Q)
-    Q = tf.exp(Q)
-    Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
-    Q = tf.reshape(Q, shape=(-1, 1))
-
-    layer_1_miss = tf.multiply(layer_1_miss, Q)
-    layer_1_miss = tf.reshape(layer_1_miss, shape=(n_distribution, size[0], num_hidden_1))
-    layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
-
-    # join layer for data_rbfn with missing values with layer for data_rbfn without missing values
+    size = tf.shape(x_miss)
+    output = random_one_sample(p_,x_miss)
+    layer_1_miss = return_layer(output, size)
+    print(layer_1_miss.get_shape())
+    print(layer_1.get_shape())
+    #
+    # # join layer for data_rbfn with missing values with layer for data_rbfn without missing values
     layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
-
-    # Encoder Hidden layer with sigmoid activation
+    #
+    # # Encoder Hidden layer with sigmoid activation
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
     return layer_3
@@ -270,6 +276,6 @@ with tf.Session() as sess:
             ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
             ax.axis('off')
             plt.savefig(os.path.join(save_dir, "".join(
-                (str(i * nn + j), "-our.png"))),
+                (str(i * nn + j), "-sample.png"))),
                         bbox_inches='tight')
             plt.close()

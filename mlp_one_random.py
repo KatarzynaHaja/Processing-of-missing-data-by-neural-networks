@@ -58,8 +58,7 @@ class Helper:
             loc=mu,
             scale_diag=sigma)
         samples = mvn.sample(10)
-        mean = tf.math.reduce_mean(samples, 0)
-        return mean
+        return samples
 
 
 class Model:
@@ -97,9 +96,11 @@ class Model:
         miss_cov = tf.where(self.where_isnan, tf.reshape(tf.tile(self.covs_[chosen_component, :], [self.size[0]]), [-1, self.size[1]]),
                             tf.zeros([self.size[0], self.size[1]]))
 
-        layer_1_m = tf.add(tf.matmul(data_miss, self.weights['h1']), self.biases['b1'])
 
-        layer_1_m = Helper.nr_multi_sample(layer_1_m, tf.matmul(miss_cov, self.weights2))
+        output = Helper.nr_one_sample(data_miss, miss_cov)
+        print(output)
+
+        layer_1_m = tf.nn.relu(tf.add(tf.matmul(output, self.weights['h1']), self.biases['b1']))
 
         norm = tf.subtract(data_miss, self.means[chosen_component, :])
         norm = tf.square(norm)
