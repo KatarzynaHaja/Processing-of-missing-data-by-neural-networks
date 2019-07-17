@@ -37,8 +37,6 @@ num_hidden_3 = 64  # 3nd layer num features (the latent dim)
 num_input = 784  # MNIST data_rbfn input (img shape: 28*28)
 
 n_distribution = 5  # number of n_distribution
-
-
 num_sample = 10
 nn = 100
 
@@ -135,14 +133,18 @@ def nr(output, size, num_sample):
     reshaped_output = tf.reshape(output, shape=(size[0] * num_sample, num_input))
     layer_1_m = tf.add(tf.matmul(reshaped_output, weights['encoder_h1']), biases['encoder_b1'])
     layer_1_m = tf.nn.relu(layer_1_m)
-    unreshaped = tf.reshape(layer_1_m, shape=(num_sample, size[0], num_hidden_1))
-    mean = tf.reduce_mean(unreshaped, 0)
+    return layer_1_m
+
+
+def mean_sample(input,size,  num_sample):
+    unreshaped = tf.reshape(input, shape=(num_sample, size[0], 784))
+    mean = tf.reduce_mean(unreshaped, axis=0)
     return mean
 
 
 def plot_loss(loss, epochs):
     plt.plot(epochs, loss)
-    plt.title('Loss - wylosowano 10 probek, uśrednianie po pierwszej warstwie')
+    plt.title('Loss - wylosowano 10 probek, uśrednianie na końcu sieci')
     plt.savefig(os.path.join(save_dir, "loss_1_sample.png"))
     plt.close()
 
@@ -173,14 +175,15 @@ def encoder(x, means, covs, p):
 
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
-    return layer_3
+    return layer_3, size
 
 
 # Building the decoder
-def decoder(x):
+def decoder(x, size):
     layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['decoder_h2']), biases['decoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['decoder_h3']), biases['decoder_b3']))
+    print(layer_3.get_shape())
     return layer_3
 
 
@@ -216,7 +219,7 @@ def prepare_data():
     return data, data_test, data_train, gmm
 
 
-def draw_image(i,j, g):
+def draw_image(i, j,  g):
     _, ax = plt.subplots(1, 1, figsize=(1, 1))
     ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
     ax.axis('off')
@@ -234,18 +237,25 @@ def main():
 
 
     # Construct model
-    encoder_op = encoder(X, means, covs, p)
-    decoder_op = decoder(encoder_op)
+    encoder_op, size = encoder(X, means, covs, p)
+    decoder_op = decoder(encoder_op, size)
 
     y_pred = decoder_op  # prediction
     y_true = prep_x(X)  # Targets (Labels) are the input data_rbfn.
 
+    print(y_pred.get_shape())
+
     where_isnan = tf.is_nan(y_true)
-    y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
-    y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
+    y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[:size[0]*num_sample,:]
+    y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[:size[0]*num_sample,:]
+
+    y_pred_known = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[size[0]*num_sample+1:,:]
+    y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[size[0]*num_sample+1:,:]
 
     # Define loss and optimizer, minimize the squared error
-    loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
+    loss_miss = 1.0/num_sample *  tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2))
+    loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2))
+    loss = loss_miss + loss_known
     optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
     # Initialize the variables (i.e. assign their default value)
@@ -278,7 +288,7 @@ def main():
 
             # Display reconstructed images
             for j in range(nn):
-                draw_image(i,j, g)
+                draw_image(i, j, g)
 
 
 main()
