@@ -40,7 +40,7 @@ n_distribution = 5  # number of n_distribution
 num_sample = 10
 nn = 100
 
-save_dir = "./results_mnist_sample/"
+save_dir = "./results_mnist_different_loss/"
 width_mask = 13  # size of window mask
 
 pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -48,7 +48,6 @@ pathlib.Path(os.path.join(save_dir, 'images_png')).mkdir(parents=True, exist_ok=
 
 # tf Graph input (only pictures)
 X = tf.placeholder("float", [None, num_input])
-
 
 initializer = tf.contrib.layers.variance_scaling_initializer()
 
@@ -122,7 +121,7 @@ def create_data(num_sample, p, x_miss, means, covs):
         mu, sigma = get_distibution_params(component, x_miss, means, covs)
         sample = random_from_component(mu, sigma)
         samples = tf.cond(tf.equal(tf.constant(sam), tf.constant(0)), lambda: tf.add(samples, sample),
-                               lambda: tf.concat((samples, sample), axis=0))
+                          lambda: tf.concat((samples, sample), axis=0))
 
     print("samples", samples.get_shape())
     return samples
@@ -136,7 +135,7 @@ def nr(output, size, num_sample):
     return layer_1_m
 
 
-def mean_sample(input,size,  num_sample):
+def mean_sample(input, size, num_sample):
     unreshaped = tf.reshape(input, shape=(num_sample, size[0], 784))
     mean = tf.reduce_mean(unreshaped, axis=0)
     return mean
@@ -145,7 +144,7 @@ def mean_sample(input,size,  num_sample):
 def plot_loss(loss, epochs):
     plt.plot(epochs, loss)
     plt.title('Loss - wylosowano 10 probek, uśrednianie na końcu sieci')
-    plt.savefig(os.path.join(save_dir, "loss_1_sample.png"))
+    plt.savefig(os.path.join(save_dir, "loss_1_diffrent loss.png"))
     plt.close()
 
 
@@ -171,7 +170,7 @@ def encoder(x, means, covs, p):
 
     print("Layer 1 miss", layer_1_miss.get_shape())
 
-    layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
+    layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
@@ -193,7 +192,7 @@ def prep_x(x):
 
     x_miss = tf.gather(x, tf.reshape(tf.where(check_isnan > 0), [-1]))
     x = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
-    return tf.concat((x, x_miss), axis=0)
+    return tf.concat((x_miss, x), axis=0)
 
 
 def prepare_data():
@@ -207,9 +206,15 @@ def prepare_data():
     data_train = 1. - data_train
     data_test = 1. - data_test
 
+    for index, image in enumerate(data_test):
+        draw_test_image(index, image, './original')
+
     data_train = data_with_mask(data_train, width_mask)
 
     data_test = data_with_mask(data_test, width_mask)
+
+    for index, image in enumerate(data_test):
+        draw_test_image(index, image, './with_holes')
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
     data = imp.fit_transform(data_train)
@@ -219,12 +224,21 @@ def prepare_data():
     return data, data_test, data_train, gmm
 
 
-def draw_image(i, j,  g):
+def draw_test_image(index, image, location):
+    _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    ax.imshow(image.reshape([28,28]), origin="upper", cmap="gray")
+    ax.axis('off')
+    plt.savefig(os.path.join(location, "".join(
+        (str(index), "mnist.png"))),
+                bbox_inches='tight')
+    plt.close()
+
+def draw_image(i, j, g):
     _, ax = plt.subplots(1, 1, figsize=(1, 1))
     ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
     ax.axis('off')
     plt.savefig(os.path.join(save_dir, "".join(
-        (str(i * nn + j), "-sample.png"))),
+        (str(i * nn + j), "-different_loss.png"))),
                 bbox_inches='tight')
     plt.close()
 
@@ -235,27 +249,30 @@ def main():
     means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
     covs = tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32)
 
-
     # Construct model
     encoder_op, size = encoder(X, means, covs, p)
     decoder_op = decoder(encoder_op, size)
 
-    y_pred = decoder_op  # prediction
-    y_true = prep_x(X)  # Targets (Labels) are the input data_rbfn.
-
-    print(y_pred.get_shape())
+    y_pred = decoder_op
+    y_true = prep_x(X)
+    print('Y true', y_true.get_shape())
+    y_true = tf.expand_dims(y_true, 0)
+    print('Y true', y_true.get_shape())
+    y_true = tf.tile(y_true, [num_sample, 1, 1])
+    y_true = tf.reshape(y_true, shape=(num_sample * size[0], num_input))
 
     where_isnan = tf.is_nan(y_true)
-    y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[:size[0]*num_sample,:]
-    y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[:size[0]*num_sample,:]
+    y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[:size[0] * num_sample, :]
+    y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[:size[0] * num_sample, :]
 
-    y_pred_known = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[size[0]*num_sample+1:,:]
-    y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[size[0]*num_sample+1:,:]
+    y_pred_known = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[size[0] * num_sample:, :]
+    y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[size[0] * num_sample:, :]
 
     # Define loss and optimizer, minimize the squared error
-    loss_miss = 1.0/num_sample *  tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2))
+    loss_miss= tf.div(tf.constant(1.0, dtype='float'), tf.constant(num_sample, dtype='float')) * tf.reduce_mean(
+        tf.pow(y_true_miss - y_pred_miss, 2))
     loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2))
-    loss = loss_miss + loss_known
+    loss = loss_miss
     optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
     # Initialize the variables (i.e. assign their default value)
@@ -290,5 +307,3 @@ def main():
             for j in range(nn):
                 draw_image(i, j, g)
 
-
-main()

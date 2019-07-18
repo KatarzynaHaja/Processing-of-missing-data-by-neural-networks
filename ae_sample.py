@@ -143,7 +143,7 @@ def nr(output, size, num_sample):
 def plot_loss(loss, epochs):
     plt.plot(epochs, loss)
     plt.title('Loss - wylosowano 10 probek, uśrednianie po pierwszej warstwie')
-    plt.savefig(os.path.join(save_dir, "loss_1_sample.png"))
+    plt.savefig(os.path.join(save_dir, "loss_10_sample.png"))
     plt.close()
 
 
@@ -165,11 +165,10 @@ def encoder(x, means, covs, p):
     print("Size", size)
     samples = create_data(num_sample, p_, x_miss, means, covs)
     layer_1_miss = nr(samples, size, num_sample)
-    layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], num_hidden_1))
 
     print("Layer 1 miss", layer_1_miss.get_shape())
 
-    layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
+    layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
@@ -190,7 +189,7 @@ def prep_x(x):
 
     x_miss = tf.gather(x, tf.reshape(tf.where(check_isnan > 0), [-1]))
     x = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
-    return tf.concat((x, x_miss), axis=0)
+    return tf.concat((x_miss, x), axis=0)
 
 
 def prepare_data():
@@ -221,7 +220,7 @@ def draw_image(i,j, g):
     ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
     ax.axis('off')
     plt.savefig(os.path.join(save_dir, "".join(
-        (str(i * nn + j), "-sample.png"))),
+        (str(i * nn + j), "-sample_1_layer.png"))),
                 bbox_inches='tight')
     plt.close()
 
@@ -246,6 +245,7 @@ def main():
 
     # Define loss and optimizer, minimize the squared error
     loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
+    print(loss)
     optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
     # Initialize the variables (i.e. assign their default value)
@@ -280,5 +280,3 @@ def main():
             for j in range(nn):
                 draw_image(i,j, g)
 
-
-main()

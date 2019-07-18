@@ -40,7 +40,7 @@ n_distribution = 5  # number of n_distribution
 num_sample = 10
 nn = 100
 
-save_dir = "./results_mnist_sample/"
+save_dir = "./results_mnist_last_layer/"
 width_mask = 13  # size of window mask
 
 pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -145,7 +145,7 @@ def mean_sample(input,size,  num_sample):
 def plot_loss(loss, epochs):
     plt.plot(epochs, loss)
     plt.title('Loss - wylosowano 10 probek, uśrednianie na końcu sieci')
-    plt.savefig(os.path.join(save_dir, "loss_1_sample.png"))
+    plt.savefig(os.path.join(save_dir, "loss_10_last_layer.png"))
     plt.close()
 
 
@@ -171,7 +171,7 @@ def encoder(x, means, covs, p):
 
     print("Layer 1 miss", layer_1_miss.get_shape())
 
-    layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
+    layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
     layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, weights['encoder_h2']), biases['encoder_b2']))
     layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['encoder_h3']), biases['encoder_b3']))
@@ -194,7 +194,7 @@ def prep_x(x):
 
     x_miss = tf.gather(x, tf.reshape(tf.where(check_isnan > 0), [-1]))
     x = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
-    return tf.concat((x, x_miss), axis=0)
+    return tf.concat((x_miss, x), axis=0)
 
 
 def prepare_data():
@@ -225,7 +225,7 @@ def draw_image(i, j,  g):
     ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
     ax.axis('off')
     plt.savefig(os.path.join(save_dir, "".join(
-        (str(i * nn + j), "-sample.png"))),
+        (str(i * nn + j), "-last_layer.png"))),
                 bbox_inches='tight')
     plt.close()
 
@@ -285,4 +285,3 @@ def main():
                 draw_image(i, j, g)
 
 
-main()
