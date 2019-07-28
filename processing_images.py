@@ -3,6 +3,7 @@ import os
 import pathlib
 import sys
 from tensorflow.examples.tutorials.mnist import input_data
+import tensorflow as tf
 
 
 class FileProcessor:
@@ -21,6 +22,14 @@ class FileProcessor:
             self.x = input_data.read_data_sets("./data_mnist/", one_hot=True)
         else:
             pass
+
+    def prep_x(self):
+        check_isnan = tf.is_nan(self.x)
+        check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
+
+        x_miss = tf.gather(self.x, tf.reshape(tf.where(check_isnan > 0), [-1]))
+        x = tf.gather(self.x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
+        return tf.concat((x, x_miss), axis=0)
 
     def random_mask_mnist(self, width_window, margin=0):
         margin_left = margin
@@ -54,6 +63,7 @@ class FileProcessor:
         self.data_test = np.random.permutation(data_test)
         self.change_background()
         self.mask_data()
+        return self.data_train, self.data_test
 
     def change_background(self):
         self.data_train = 1. - self.data_train

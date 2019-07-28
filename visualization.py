@@ -14,7 +14,7 @@ class Visualizator:
         plt.savefig(os.path.join(self.save_dir, self.file_name))
         plt.close()
 
-    def draw_mnist_image(self, i, j, g, ):
+    def draw_mnist_image(self, i, j, g):
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
