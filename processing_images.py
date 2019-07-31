@@ -23,12 +23,12 @@ class FileProcessor:
         else:
             pass
 
-    def prep_x(self):
-        check_isnan = tf.is_nan(self.x)
+    def prep_x(self, X):
+        check_isnan = tf.is_nan(X)
         check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
 
-        x_miss = tf.gather(self.x, tf.reshape(tf.where(check_isnan > 0), [-1]))
-        x = tf.gather(self.x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
+        x_miss = tf.gather(X, tf.reshape(tf.where(check_isnan > 0), [-1]))
+        x = tf.gather(X, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
         return tf.concat((x, x_miss), axis=0)
 
     def random_mask_mnist(self, width_window, margin=0):
@@ -57,7 +57,7 @@ class FileProcessor:
         self.labels = np.where(self.x.test.labels == 1)[1]
         data_test = self.x.test.images[np.where(self.labels == 0)[0][:self.nn], :]
         for i in range(1, 10):
-            data_test = np.concatenate([self.data_test, self.x.test.images[np.where(self.labels == i)[0][:self.nn], :]],
+            data_test = np.concatenate([data_test, self.x.test.images[np.where(self.labels == i)[0][:self.nn], :]],
                                        axis=0)
 
         self.data_test = np.random.permutation(data_test)

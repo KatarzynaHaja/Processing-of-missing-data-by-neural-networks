@@ -65,13 +65,13 @@ class Sampling:
 
         return data_miss, miss_cov
 
-    def generate_samples(self, p, x_miss, means, covs, num_input):
+    def generate_samples(self, p, x_miss, means, covs, num_input, gamma):
         size = tf.shape(x_miss)
         samples = tf.zeros([1, size[0], num_input])
-        new_p = self.calculate_p(p, means, covs, )
+        new_p = self.calculate_p(p, means, covs, gamma)
 
         for sam in range(self.num_sample):
-            component = self.random_component(p)
+            component = self.random_component(new_p)
             mu, sigma = self.get_distibution_params(component, means, covs)
             sample = self.random_from_component(mu, sigma)
             samples = tf.cond(tf.equal(tf.constant(sam), tf.constant(0)), lambda: tf.add(samples, sample),
@@ -79,8 +79,7 @@ class Sampling:
 
         return samples
 
-    def nr(self, output):
-        #TODOD: czy powinno to byc w tej klasie czy w autoencoderze ??? ewentaulnie przesyłac
+    def nr_after_first_layer(self, output):
         reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
         layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['encoder_h1']),
                            self.params.biases['encoder_b1'])
