@@ -1,12 +1,14 @@
 import matplotlib.pyplot as plt
 import os
-
+import pathlib
 
 class Visualizator:
     def __init__(self, save_dir, file_name, nn ):
         self.save_dir = save_dir
         self.file_name = file_name
         self.nn = nn
+
+        pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     def plot_loss(self, loss, epochs, title):
         plt.plot(epochs, loss)

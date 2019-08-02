@@ -4,15 +4,17 @@ import numpy as np
 
 tfd = tfp.distributions
 
+
 class Sampling:
-    def __init__(self, num_sample, params, x_miss, n_distribution):
+    def __init__(self, num_sample, params, x_miss, n_distribution, method):
         self.num_sample = num_sample  # 10
         self.params = params
         self.x_miss = x_miss
         self.size = tf.shape(x_miss)
         self.n_distribution = n_distribution
+        self.method = method
 
-    def calculate_p(self, p,  means, covs, gamma):
+    def calculate_p(self, p, means, covs, gamma):
         Q = []
         where_isfinite = tf.is_finite(self.x_miss)
 
@@ -49,7 +51,7 @@ class Sampling:
         return Q
 
     def random_component(self, p):
-        return tf.squeeze(tf.gather(tf.random.multinomial(p, 1), 0))
+        return tf.squeeze(tf.random.multinomial(tf.log(p), 1))
 
     def random_from_component(self, mu, sigma):
         mvn = tfd.MultivariateNormalDiag(
@@ -59,9 +61,11 @@ class Sampling:
 
     def get_distibution_params(self, component, means, covs):
         where_isnan = tf.is_nan(self.x_miss)
-        data_miss = tf.where(where_isnan, tf.reshape(tf.tile(means[component, :], [self.size[0]]), [-1, self.size[1]]), self.x_miss)
-        miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[component, :], [self.size[0]]), [-1, self.size[1]]),
-                            tf.zeros([self.size[0], self.size[1]]))
+        component_means = tf.gather(means, component)
+        data_miss = tf.where(where_isnan, component_means, self.x_miss)
+
+        component_covs = tf.gather(covs, component)
+        miss_cov = tf.where(where_isnan, component_covs, self.x_miss)
 
         return data_miss, miss_cov
 
@@ -69,6 +73,7 @@ class Sampling:
         size = tf.shape(x_miss)
         samples = tf.zeros([1, size[0], num_input])
         new_p = self.calculate_p(p, means, covs, gamma)
+        new_p = tf.transpose(new_p, (1, 0))
 
         for sam in range(self.num_sample):
             component = self.random_component(new_p)
@@ -79,11 +84,20 @@ class Sampling:
 
         return samples
 
-    def nr_after_first_layer(self, output):
+    def nr(self, output):
         reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
         layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['encoder_h1']),
                            self.params.biases['encoder_b1'])
         layer_1_m = tf.nn.relu(layer_1_m)
-        unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))
-        mean = tf.reduce_mean(unreshaped, 0)
+
+        if self.method == 'first_layer':
+            unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))
+            mean = tf.reduce_mean(unreshaped, 0)
+            return mean
+        if self.method == 'last_layer':
+            return layer_1_m
+
+    def mean_sample(self, input):
+        unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], self.params.num_input))
+        mean = tf.reduce_mean(unreshaped, axis=0)
         return mean

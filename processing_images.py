@@ -7,9 +7,9 @@ import tensorflow as tf
 
 
 class FileProcessor:
-    def __init__(self, path, type, nn, width_mask=13):
+    def __init__(self, path, dataset, nn, width_mask=13):
         self.path = path
-        self.type = type
+        self.dataset = dataset
         self.x = None
         self.nn = nn
         self.data_test = None
@@ -18,18 +18,10 @@ class FileProcessor:
         self.width_mask = width_mask
 
     def read_data(self):
-        if self.type == 'mnist':
+        if self.dataset == 'mnist':
             self.x = input_data.read_data_sets("./data_mnist/", one_hot=True)
         else:
             pass
-
-    def prep_x(self, X):
-        check_isnan = tf.is_nan(X)
-        check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
-
-        x_miss = tf.gather(X, tf.reshape(tf.where(check_isnan > 0), [-1]))
-        x = tf.gather(X, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
-        return tf.concat((x, x_miss), axis=0)
 
     def random_mask_mnist(self, width_window, margin=0):
         margin_left = margin

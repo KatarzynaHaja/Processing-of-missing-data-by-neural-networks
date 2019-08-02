@@ -10,8 +10,9 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+
 class AutoencoderParams:
-    def __init__(self):
+    def __init__(self, method, num_sample, dataset):
         initializer = tf.contrib.layers.variance_scaling_initializer()
         self.num_hidden_1 = 256  # 1st layer num features
         self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
@@ -19,8 +20,9 @@ class AutoencoderParams:
         self.num_input = 784  # MNIST data_rbfn input (img shape: 28*28)
 
         self.nn = 100
-
-        self.X = tf.placeholder("float", [None, self.num_input])
+        self.method = method
+        self.dataset = dataset
+        self.num_sample = num_sample
 
         self.weights = {
             'encoder_h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
@@ -40,15 +42,21 @@ class AutoencoderParams:
         }
 
 
-
 class Autoencoder:
-    def __init__(self, params, method):
+    def __init__(self, params):
         self.params = params
-        self.method = method
-        self.file_processor = FileProcessor(path='', type= 'mnist', width_mask=13, nn=10)
+        self.file_processor = FileProcessor(path='', dataset='mnist', width_mask=13, nn=10)
         self.data_train = None
         self.data_test = None
         self.n_distribution = 5  # number of n_distribution
+
+        self.X = tf.placeholder("float", [None, self.params.num_input])
+
+        self.x_miss, self.x_known = self.prepare_data(self.X)
+
+        self.sampling = Sampling(num_sample=10, params=self.params, x_miss=self.x_miss, n_distribution=self.n_distribution,
+                                 method=self.params.method)
+
 
 
     def load_data(self):
@@ -63,7 +71,6 @@ class Autoencoder:
         self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
         self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
 
-
     def prepare_data(self, x):
         check_isnan = tf.is_nan(x)
         check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
@@ -73,49 +80,96 @@ class Autoencoder:
 
         return x_miss, x_known
 
-    def encoder(self,x):
-        x_miss, x_known = self.prepare_data(x)
+    def prep_x(self, X):
+        check_isnan = tf.is_nan(X)
+        check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
 
-        sampling = Sampling(num_sample=10, params=self.params, x_miss=x_miss, n_distribution=self.n_distribution)
-        layer_1 = tf.nn.relu(tf.add(tf.matmul(x_known,self.params. weights['encoder_h1']), self.params.biases['encoder_b1']))
-        size = tf.shape(x_miss)
-        samples = sampling.generate_samples(self.p, x_miss, self.means, self.covs, self.params.num_input,self.gamma)
-        layer_1_miss = sampling.nr_after_first_layer(samples)
-        layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+        x_miss = tf.gather(X, tf.reshape(tf.where(check_isnan > 0), [-1]))
+        x = tf.gather(X, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
+        return tf.concat((x, x_miss), axis=0)
 
-        layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
+    def encoder(self):
+        size = tf.shape(self.x_miss)
 
-        layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, self.params.weights['encoder_h2']), self.params.biases['encoder_b2']))
-        layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, self.params.weights['encoder_h3']), self.params.biases['encoder_b3']))
-        return layer_3, size
+        if self.params.method != 'imputation':
+            samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs, self.params.num_input,
+                                                     self.gamma)
+            layer_1 = tf.nn.relu(
+                tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']), self.params.biases['encoder_b1']))
 
-    # Building the decoder
-    def decoder(self, x):
-        layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, self.params.weights['decoder_h1']), self.params.biases['decoder_b1']))
-        layer_2 = tf.nn.sigmoid(tf.add(tf.matmul(layer_1, self.params.weights['decoder_h2']), self.params.biases['decoder_b2']))
-        layer_3 = tf.nn.sigmoid(tf.add(tf.matmul(layer_2,self.params.weights['decoder_h3']), self.params.biases['decoder_b3']))
+            layer_1_miss = self.sampling.nr(samples)
+            layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+
+            layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
+
+        if self.params.method == 'imputation':
+            imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
+            data = imp.fit_transform(self.data_train)
+            layer_1 = tf.nn.relu(
+                tf.add(tf.matmul(data, self.params.weights['encoder_h1']), self.params.biases['encoder_b1']))
+
+        layer_2 = tf.nn.sigmoid(
+            tf.add(tf.matmul(layer_1, self.params.weights['encoder_h2']), self.params.biases['encoder_b2']))
+        layer_3 = tf.nn.sigmoid(
+            tf.add(tf.matmul(layer_2, self.params.weights['encoder_h3']), self.params.biases['encoder_b3']))
         return layer_3
+
+
+    def decoder(self, x):
+        layer_1 = tf.nn.sigmoid(
+            tf.add(tf.matmul(x, self.params.weights['decoder_h1']), self.params.biases['decoder_b1']))
+        layer_2 = tf.nn.sigmoid(
+            tf.add(tf.matmul(layer_1, self.params.weights['decoder_h2']), self.params.biases['decoder_b2']))
+        layer_3 = tf.nn.sigmoid(
+            tf.add(tf.matmul(layer_2, self.params.weights['decoder_h3']), self.params.biases['decoder_b3']))
+
+        if self.params.method != 'last_layer':
+            return layer_3
+
+        if self.params.method == 'last_layer':
+            input = layer_3[:self.params.size[0] * self.params.num_sample, :]
+            mean = self.sampling.mean_sample(input)
+            return mean
 
     def autoencoder_main_loop(self):
         learning_rate = 0.01
-        n_epochs = 250
+        n_epochs = 1
         batch_size = 64
+
+        loss = None
 
         self.load_data()
         self.set_variables()
 
-        encoder_op = self.encoder(self.params.X)
-        decoder_op = self.decoder(encoder_op[0])
+        encoder_op = self.encoder()
+        decoder_op = self.decoder(encoder_op)
 
         y_pred = decoder_op  # prediction
-        y_true = self.file_processor.prep_x(self.params.X) # Targets (Labels) are the input data_rbfn.
-
-        where_isnan = tf.is_nan(y_true)
-        y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
-        y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
+        y_true = self.prep_x(self.X)  # Targets (Labels) are the input data_rbfn.
 
         # Define loss and optimizer, minimize the squared error
-        loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
+        if self.params.method != 'last_layer':
+            where_isnan = tf.is_nan(y_true)
+            y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
+            y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
+            loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
+
+        if self.params.method == 'last_layer':
+            y_true = tf.expand_dims(y_true, 0)
+            y_true = tf.tile(y_true, [self.params.num_sample, 1, 1])
+            y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.params.size[0], self.params.num_input))
+            where_isnan = tf.is_nan(y_true)
+            y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[:self.params.size[0] * self.params.num_sample, :]
+            y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[:self.params.size[0] * self.params.num_sample, :]
+
+            y_pred_known = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[self.params.size[0] * self.params.num_sample:, :]
+            y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[self.params.size[0] * self.params.num_sample:, :]
+            loss_miss = tf.div(tf.constant(1.0, dtype='float'),
+                               tf.constant(self.params.num_sample, dtype='float')) * tf.reduce_mean(
+                tf.pow(y_true_miss - y_pred_miss, 2))
+            #loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2))
+            loss = loss_miss
+
         optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
         # Initialize the variables (i.e. assign their default value)
@@ -133,18 +187,18 @@ class Autoencoder:
 
                     batch_x = self.data_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
-                    _, l = sess.run([optimizer, loss], feed_dict={self.params.X: batch_x})
+                    _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
 
                 print('Step {:d}: Minibatch Loss: {:.8f}'.format(epoch, l))
+
             for i in range(10):
                 batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
-                g = sess.run(decoder_op, feed_dict={self.params.X: batch_x})
-                _, e = sess.run([optimizer, loss], feed_dict={self.params.X:batch_x})
-                #print('Step {:d}: Minibatch Loss: {:.8f}'.format(i, e))
+                g = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
 
                 for j in range(self.params.nn):
                     v.draw_mnist_image(i, j, g)
+
 
 p = AutoencoderParams()
 a = Autoencoder(p, None)
