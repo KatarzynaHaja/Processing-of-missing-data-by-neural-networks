@@ -10,7 +10,6 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-
 class AutoencoderParams:
     def __init__(self, method, num_sample, dataset):
         initializer = tf.contrib.layers.variance_scaling_initializer()
@@ -131,9 +130,9 @@ class Autoencoder:
             mean = self.sampling.mean_sample(input)
             return mean
 
-    def autoencoder_main_loop(self):
+
+    def autoencoder_main_loop(self, n_epochs):
         learning_rate = 0.01
-        n_epochs = 1
         batch_size = 64
 
         loss = None
@@ -148,13 +147,13 @@ class Autoencoder:
         y_true = self.prep_x(self.X)  # Targets (Labels) are the input data_rbfn.
 
         # Define loss and optimizer, minimize the squared error
-        if self.params.method != 'last_layer':
+        if self.params.method != 'diffrent_cost':
             where_isnan = tf.is_nan(y_true)
             y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
             y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
             loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
 
-        if self.params.method == 'last_layer':
+        if self.params.method == 'diffrent_cost':
             y_true = tf.expand_dims(y_true, 0)
             y_true = tf.tile(y_true, [self.params.num_sample, 1, 1])
             y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.params.size[0], self.params.num_input))
@@ -191,15 +190,36 @@ class Autoencoder:
 
                 print('Step {:d}: Minibatch Loss: {:.8f}'.format(epoch, l))
 
+            train_loss = []
             for i in range(10):
                 batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
-                g = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
+                g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
+                # for j in range(self.params.nn):
+                #     v.draw_mnist_image(i, j, g, self.params.method)
+                train_loss.append(l_test)
 
-                for j in range(self.params.nn):
-                    v.draw_mnist_image(i, j, g)
+        return np.mean(train_loss)
+
+from sklearn.model_selection import ParameterGrid
 
 
-p = AutoencoderParams()
-a = Autoencoder(p, None)
-a.autoencoder_main_loop()
+def search_the_best_params():
+    hyper_params = {'num_sample':[1, 5, 10], 'epoch':[1, 150, 200, 250]}
+    methods = ['first_layer', 'last_layer', 'diffrent_cost', 'imputation']
+    grid = ParameterGrid(hyper_params)
+    results = {}
+    for method in methods:
+        for params in grid:
+            print(method, params)
+            p = AutoencoderParams(method=method, num_sample=params['num_sample'], dataset='mnist')
+            a = Autoencoder(p)
+            loss = a.autoencoder_main_loop(params['epoch'])
+            results[method+","+str(params['num_sample'])+','+str(params['epoch'])] = loss
+            print(results)
+    return results
+
+results = sorted(search_the_best_params(), key=lambda x: x[1], reverse=True)
+f = open('loss_results', "w")
+f.write(results)
+f.close()

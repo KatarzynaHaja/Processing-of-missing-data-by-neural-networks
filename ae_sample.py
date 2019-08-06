@@ -94,7 +94,7 @@ class Sampling:
             unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))
             mean = tf.reduce_mean(unreshaped, 0)
             return mean
-        if self.method == 'last_layer':
+        if self.method != 'first_layer':
             return layer_1_m
 
     def mean_sample(self, input):
