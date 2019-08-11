@@ -114,4 +114,3 @@ def main():
             # Display reconstructed images
             for j in range(nn):
                 draw_image(i,j, g)
-
