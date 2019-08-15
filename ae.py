@@ -269,23 +269,13 @@ with tf.Session() as sess:
 
     print(loss_k/250)
 
-
-
-
+    test_loss = []
     # results for test data_rbfn
     for i in range(10):
         batch_x = data_test[(i * nn):((i + 1) * nn), :]
+        g, l_test = sess.run([decoder_op, loss], feed_dict={X: batch_x})
+        # for j in range(self.params.nn):
+        #     v.draw_mnist_image(i, j, g, self.params.method)
+        test_loss.append(l_test)
 
-        # Encode and decode the digit image
-        g = sess.run(decoder_op, feed_dict={X: batch_x})
-
-        # Display reconstructed images
-        for j in range(nn):
-            # Draw the reconstructed digits
-            _, ax = plt.subplots(1, 1, figsize=(1, 1))
-            ax.imshow(g[j].reshape([28, 28]), origin="upper", cmap="gray")
-            ax.axis('off')
-            plt.savefig(os.path.join(save_dir, "".join(
-                (str(i * nn + j), "-our.png"))),
-                        bbox_inches='tight')
-            plt.close()
+print(np.mean(test_loss))
