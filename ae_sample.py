@@ -82,7 +82,6 @@ class Sampling:
             samples = tf.cond(tf.equal(tf.constant(sam), tf.constant(0)), lambda: tf.add(samples, sample),
                               lambda: tf.concat((samples, sample), axis=0))
 
-        self.component = component
         return samples
 
     def nr(self, output):

@@ -1,7 +1,7 @@
 import tensorflow as tf
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import Imputer
-from processing_images import FileProcessor
+from processing_images import DatasetProcessor
 from ae_sample import Sampling
 from visualization import Visualizator
 import numpy as np
@@ -43,41 +43,30 @@ class AutoencoderFCParams:
 
 
 class AutoencoderFC:
-    def __init__(self, params):
+    def __init__(self, params, data_train, data_test, data_imputed):
+        self.data_train = data_train
+        self.data_test = data_test
+        self.data_imputed = data_imputed
         self.params = params
-        self.file_processor = FileProcessor(path='', dataset='mnist', width_mask=13, nn=100)
-        self.data_train = None
-        self.data_test = None
         self.n_distribution = 5  # number of n_distribution
-
         self.X = tf.placeholder("float", [None, self.params.num_input])
 
         if self.params.method != 'imputation':
-            self.x_miss, self.x_known = self.prepare_data(self.X)
+            self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
             self.size = tf.shape(self.x_miss)
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
 
-    def load_data(self):
-        self.data_train, self.data_test = self.file_processor.prepare_data()
-
     def set_variables(self):
-        imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
-        self.data_imputed = imp.fit_transform(self.data_train)
-
         if self.params.method != 'imputation':
             gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(self.data_imputed)
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
             self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
-            # self.gamma = tf.abs(self.gamma)
-            # self.gamma_ = tf.cond(tf.less(self.gamma[0], 1.), lambda: self.gamma, lambda: tf.pow(self.gamma, 2))
-            # self.p = tf.abs(self.p)
-            # self.p = tf.div(self.p, tf.reduce_sum(self.p, axis=0))
 
-    def prepare_data(self, x):
+    def divide_data_into_known_and_missing(self, x):
         check_isnan = tf.is_nan(x)
         check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
 
@@ -85,18 +74,6 @@ class AutoencoderFC:
         x_known = tf.gather(x, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))  # data_without missing values
 
         return x_miss, x_known
-
-    def prep_x(self, X):
-        if self.params.method != 'imputation':
-            check_isnan = tf.is_nan(X)
-            check_isnan = tf.reduce_sum(tf.cast(check_isnan, tf.int32), 1)
-
-            x_miss = tf.gather(X, tf.reshape(tf.where(check_isnan > 0), [-1]))
-            x = tf.gather(X, tf.reshape(tf.where(tf.equal(check_isnan, 0)), [-1]))
-            return tf.concat((x, x_miss), axis=0)
-        else:
-           pass
-
 
     def encoder(self):
         if self.params.method != 'imputation':
@@ -113,7 +90,8 @@ class AutoencoderFC:
 
         if self.params.method == 'imputation':
             layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.data_imputed, self.params.weights['encoder_h1']), self.params.biases['encoder_b1']))
+                tf.add(tf.matmul(self.data_imputed, self.params.weights['encoder_h1']),
+                       self.params.biases['encoder_b1']))
 
         layer_2 = tf.nn.sigmoid(
             tf.add(tf.matmul(layer_1, self.params.weights['encoder_h2']), self.params.biases['encoder_b2']))
@@ -143,22 +121,21 @@ class AutoencoderFC:
 
         loss = None
 
-        self.load_data()
         self.set_variables()
 
         encoder_op = self.encoder()
         decoder_op = self.decoder(encoder_op)
 
         y_pred = decoder_op  # prediction
-        y_true = self.prep_x(self.X)
+        y_true = tf.concat((self.x_known, self.x_miss), axis=0)  # z nanami
 
-        if self.params.method != 'diffrent_cost':
+        if self.params.method != 'different_cost':
             where_isnan = tf.is_nan(y_true)
             y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
             y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
             loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
 
-        if self.params.method == 'diffrent_cost':
+        if self.params.method == 'different_cost':
             y_true = tf.expand_dims(y_true, 0)
             y_true = tf.tile(y_true, [self.params.num_sample, 1, 1])
             y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.size[0], self.params.num_input))
@@ -172,9 +149,8 @@ class AutoencoderFC:
                            self.size[0] * self.params.num_sample:, :]
             y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
                            self.size[0] * self.params.num_sample:, :]
-            loss_miss = tf.div(tf.constant(1.0, dtype='float'),
-                               tf.constant(self.params.num_sample, dtype='float')) * tf.reduce_mean(
-                tf.pow(y_true_miss - y_pred_miss, 2))
+            loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=2),
+                                       axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
             # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2))
             loss = loss_miss
 
@@ -183,7 +159,7 @@ class AutoencoderFC:
         # Initialize the variables (i.e. assign their default value)
         init = tf.global_variables_initializer()
 
-        v = Visualizator('result_mnist_s', 'loss', 100)
+        v = Visualizator('result_mnist_first', 'loss', 100)
         with tf.Session() as sess:
             sess.run(init)  # run the initializer
             for epoch in range(1, n_epochs + 1):
@@ -204,8 +180,8 @@ class AutoencoderFC:
                 batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
                 g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-                # for j in range(self.params.nn):
-                #     v.draw_mnist_image(i, j, g, self.params.method)
+                for j in range(self.params.nn):
+                    v.draw_mnist_image(i, j, g, self.params.method)
                 test_loss.append(l_test)
 
         return np.mean(test_loss)
@@ -214,43 +190,41 @@ class AutoencoderFC:
 from sklearn.model_selection import ParameterGrid
 
 
-def search_the_best_params():
-    hyper_params = {'num_sample': [1, 5, 10], 'epoch': [100, 175, 250]}
-    methods = ['last_layer']
-    grid = ParameterGrid(hyper_params)
-    results = {}
-    f = open('loss_results', "a")
-    for method in methods:
-        for params in grid:
-            print(method, params)
-            p = AutoencoderFCParams(method=method, dataset='mnist', num_sample=params['num_sample'])
-            a = AutoencoderFC(p)
-            loss = a.autoencoder_main_loop(params['epoch'])
-            print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + str(loss))
-            f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
-                    + str(params['epoch'])  + 'result:'+ str(loss) )
-            f.write('\n')
-    f.close()
+def run_model():
+    dataset_processor = DatasetProcessor(path='', dataset='mnist', width_mask=13, nn=100)
+    X = dataset_processor.load_data()
+    data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
+    p = AutoencoderFCParams(method='last_layer', dataset='mnist', num_sample=5)
+
+    data_test = np.random.permutation(data_test)
+    data_test, data_train = dataset_processor.change_background(data_test, data_train)
+    data_test, data_train = dataset_processor.mask_data(data_test, data_train)
+
+    imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
+    data_imputed = imp.fit_transform(data_train)
+
+    a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed=data_imputed)
+
+    a.autoencoder_main_loop(100)
 
 
+run_model()
 
-def imputation():
-    hyper_params = {'epoch': [100, 175, 250]}
-    methods = ['imputation']
-    grid = ParameterGrid(hyper_params)
-    results = {}
-    f = open('loss_results', "a")
-    for method in methods:
-        for params in grid:
-            print(method, params)
-            p = AutoencoderFCParams(method=method, dataset='mnist')
-            a = AutoencoderFC(p)
-            loss = a.autoencoder_main_loop(params['epoch'])
-            print(method + "," + str(params['epoch']) + str(loss))
-            f.write(method + str(params['num_sample']) + ', epoch:'
-                    + str(params['epoch'])  + 'result:'+ str(loss) )
-            f.write('\n')
-    f.close()
-
-search_the_best_params()
-#imputation()
+#
+# def search_the_best_params():
+#     hyper_params = {'num_sample': [1, 5, 10], 'epoch': [100, 175, 250]}
+#     methods = ['last_layer']
+#     grid = ParameterGrid(hyper_params)
+#     results = {}
+#     f = open('loss_results', "a")
+#     for method in methods:
+#         for params in grid:
+#             print(method, params)
+#             p = AutoencoderFCParams(method=method, dataset='mnist', num_sample=params['num_sample'])
+#             a = AutoencoderFC(p)
+#             loss = a.autoencoder_main_loop(params['epoch'])
+#             print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + str(loss))
+#             f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
+#                     + str(params['epoch'])  + 'result:'+ str(loss) )
+#             f.write('\n')
+#     f.close()

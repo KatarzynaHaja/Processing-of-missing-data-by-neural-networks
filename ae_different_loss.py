@@ -144,7 +144,7 @@ def mean_sample(input, size, num_sample):
 def plot_loss(loss, epochs):
     plt.plot(epochs, loss)
     plt.title('Loss - wylosowano 10 probek, uśrednianie na końcu sieci')
-    plt.savefig(os.path.join(save_dir, "loss_1_diffrent loss.png"))
+    plt.savefig(os.path.join(save_dir, "loss_1_different loss.png"))
     plt.close()
 
 

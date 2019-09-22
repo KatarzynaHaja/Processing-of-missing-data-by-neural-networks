@@ -1,25 +1,18 @@
 import numpy as np
-import os
-import pathlib
-import sys
 from tensorflow.examples.tutorials.mnist import input_data
-import tensorflow as tf
 
 
-class FileProcessor:
+class DatasetProcessor:
     def __init__(self, path, dataset, nn, width_mask=13):
         self.path = path
         self.dataset = dataset
         self.x = None
         self.nn = nn
-        self.data_test = None
-        self.data_train = None
-        self.labels = None
         self.width_mask = width_mask
 
-    def read_data(self):
+    def load_data(self):
         if self.dataset == 'mnist':
-            self.x = input_data.read_data_sets("./data_mnist/", one_hot=True)
+            return input_data.read_data_sets("./data_mnist/", one_hot=True)
         else:
             pass
 
@@ -43,31 +36,19 @@ class FileProcessor:
             x[i, mask] = np.nan
         return x
 
-    def prepare_data(self):
-        self.read_data()
-        self.data_train = self.x.train.images
-        self.labels = np.where(self.x.test.labels == 1)[1]
-        data_test = self.x.test.images[np.where(self.labels == 0)[0][:self.nn], :]
+    def divide_dataset_into_test_and_train(self, X):
+        data_train = X.train.images
+        labels = np.where(X.test.labels == 1)[1]
+        data_test = X.test.images[np.where(labels == 0)[0][:self.nn], :]
         for i in range(1, 10):
-            data_test = np.concatenate([data_test, self.x.test.images[np.where(self.labels == i)[0][:self.nn], :]],
+            data_test = np.concatenate([data_test, X.test.images[np.where(labels == i)[0][:self.nn], :]],
                                        axis=0)
 
-        self.data_test = np.random.permutation(data_test)
-        self.change_background()
-        self.mask_data()
-        return self.data_train, self.data_test
+        return data_test, data_train
 
-    def change_background(self):
-        self.data_train = 1. - self.data_train
-        self.data_test = 1. - self.data_test
+    def change_background(self, data_test, data_train):
+        return 1. - data_test, 1. - data_train
 
-    def mask_data(self):
-        self.data_train = self.data_with_mask_mnist(self.data_train, self.width_mask)
-        self.data_test = self.data_with_mask_mnist(self.data_test, self.width_mask)
-
-    def save_result_in_dir(self, save_dir, file_name):
-        pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
-        pathlib.Path(os.path.join(save_dir, file_name)).mkdir(parents=True, exist_ok=True)
-
-
-
+    def mask_data(self, data_test, data_train):
+        return self.data_with_mask_mnist(data_test, self.width_mask), self.data_with_mask_mnist(data_train,
+                                                                                                self.width_mask)
