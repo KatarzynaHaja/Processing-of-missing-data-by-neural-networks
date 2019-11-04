@@ -11,13 +11,13 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
-class AutoencoderFCParams:
+class ClassificationFCParams:
     def __init__(self, method, dataset, num_sample=None, ):
         initializer = tf.contrib.layers.variance_scaling_initializer()
-        self.num_hidden_1 = 256  # 1st layer num features
-        self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
-        self.num_hidden_3 = 64  # 3nd layer num features (the latent dim)
-        self.num_input = 784  # MNIST data_rbfn input (img shape: 28*28)
+        self.num_input = 784
+        self.num_hidden_1 = 128  # 1st layer num features
+        self.num_hidden_2 = 64  # 2nd layer num features (the latent dim)
+        self.num_output = 10
 
         self.nn = 100
         self.method = method
@@ -25,24 +25,18 @@ class AutoencoderFCParams:
         self.num_sample = num_sample
 
         self.weights = {
-            'encoder_h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
-            'encoder_h2': tf.Variable(initializer([self.num_hidden_1, self.num_hidden_2])),
-            'encoder_h3': tf.Variable(initializer([self.num_hidden_2, self.num_hidden_3])),
-            'decoder_h1': tf.Variable(initializer([self.num_hidden_3, self.num_hidden_2])),
-            'decoder_h2': tf.Variable(initializer([self.num_hidden_2, self.num_hidden_1])),
-            'decoder_h3': tf.Variable(initializer([self.num_hidden_1, self.num_input])),
+            'h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
+            'h2': tf.Variable(initializer([self.num_hidden_1, self.num_hidden_2])),
+            'h3': tf.Variable(initializer([self.num_hidden_2, self.num_output])),
         }
         self.biases = {
-            'encoder_b1': tf.Variable(tf.random_normal([self.num_hidden_1])),
-            'encoder_b2': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'encoder_b3': tf.Variable(tf.random_normal([self.num_hidden_3])),
-            'decoder_b1': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'decoder_b2': tf.Variable(tf.random_normal([self.num_hidden_1])),
-            'decoder_b3': tf.Variable(tf.random_normal([self.num_input])),
+            'b1': tf.Variable(tf.random_normal([self.num_hidden_1])),
+            'b2': tf.Variable(tf.random_normal([self.num_hidden_2])),
+            'b3': tf.Variable(tf.random_normal([self.num_output])),
         }
 
 
-class AutoencoderFC:
+class ClassificationFC:
     def __init__(self, params, data_train, data_test, data_imputed_train, data_imputed_test, gamma):
         self.data_train = data_train
         self.data_test = data_test
@@ -80,13 +74,13 @@ class AutoencoderFC:
 
         return x_miss, x_known
 
-    def encoder(self):
+    def model(self):
         if self.params.method != 'imputation':
             size = tf.shape(self.x_miss)
             samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs, self.params.num_input,
                                                      self.gamma)
             layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']), self.params.biases['encoder_b1']))
+                tf.add(tf.matmul(self.x_known, self.params.weights['h1']), self.params.biases['b1']))
 
             layer_1_miss = self.sampling.nr(samples)
             layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
@@ -95,22 +89,14 @@ class AutoencoderFC:
 
         if self.params.method == 'imputation':
             layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.X, self.params.weights['encoder_h1']),
-                       self.params.biases['encoder_b1']))
+                tf.add(tf.matmul(self.X, self.params.weights['h1']),
+                       self.params.biases['b1']))
 
-        layer_2 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_1, self.params.weights['encoder_h2']), self.params.biases['encoder_b2']))
-        layer_3 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_2, self.params.weights['encoder_h3']), self.params.biases['encoder_b3']))
-        return layer_3
+        layer_2 = tf.nn.relu(
+            tf.add(tf.matmul(layer_1, self.params.weights['h2']), self.params.biases['b2']))
 
-    def decoder(self, x):
-        layer_1 = tf.nn.sigmoid(
-            tf.add(tf.matmul(x, self.params.weights['decoder_h1']), self.params.biases['decoder_b1']))
-        layer_2 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_1, self.params.weights['decoder_h2']), self.params.biases['decoder_b2']))
-        layer_3 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_2, self.params.weights['decoder_h3']), self.params.biases['decoder_b3']))
+        layer_3 = tf.nn.softmax(
+            tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3']))
 
         if self.params.method != 'last_layer':
             return layer_3
@@ -120,7 +106,10 @@ class AutoencoderFC:
             mean = self.sampling.mean_sample(input)
             return mean
 
-    def autoencoder_main_loop(self, n_epochs):
+        return layer_3
+
+
+    def main_loop(self, n_epochs):
         learning_rate = 0.01
         batch_size = 64
 
@@ -128,11 +117,8 @@ class AutoencoderFC:
 
         self.set_variables()
 
-        encoder_op = self.encoder()
-        decoder_op = self.decoder(encoder_op)
-
-        y_pred = decoder_op  # prediction
-        y_true = tf.concat((self.x_known, self.x_miss), axis=0)  # z nanami
+        y_pred = run_model()  # prediction
+        y_true =  labels  # z nanami
 
         if self.params.method != 'different_cost':
             where_isnan = tf.is_nan(y_true)
