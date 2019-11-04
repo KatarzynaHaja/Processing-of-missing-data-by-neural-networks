@@ -43,28 +43,33 @@ class AutoencoderFCParams:
 
 
 class AutoencoderFC:
-    def __init__(self, params, data_train, data_test, data_imputed):
+    def __init__(self, params, data_train, data_test, data_imputed_train, data_imputed_test, gamma):
         self.data_train = data_train
         self.data_test = data_test
-        self.data_imputed = data_imputed
+        self.data_imputed_train = data_imputed_train
+        self.data_imputed_test = data_imputed_test
         self.params = params
         self.n_distribution = 5  # number of n_distribution
         self.X = tf.placeholder("float", [None, self.params.num_input])
+        self.original = tf.placeholder("float", [None, self.params.num_input])
+        self.gamma = gamma
+        self.gamma_int = gamma
+
+        self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
+        self.size = tf.shape(self.x_miss)
 
         if self.params.method != 'imputation':
-            self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
-            self.size = tf.shape(self.x_miss)
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
 
     def set_variables(self):
         if self.params.method != 'imputation':
-            gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(self.data_imputed)
+            gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(self.data_imputed_train)
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
-            self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
+            self.gamma = tf.Variable(initial_value=self.gamma)
 
     def divide_data_into_known_and_missing(self, x):
         check_isnan = tf.is_nan(x)
@@ -90,7 +95,7 @@ class AutoencoderFC:
 
         if self.params.method == 'imputation':
             layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.data_imputed, self.params.weights['encoder_h1']),
+                tf.add(tf.matmul(self.X, self.params.weights['encoder_h1']),
                        self.params.biases['encoder_b1']))
 
         layer_2 = tf.nn.sigmoid(
@@ -159,7 +164,10 @@ class AutoencoderFC:
         # Initialize the variables (i.e. assign their default value)
         init = tf.global_variables_initializer()
 
-        v = Visualizator('result_mnist_first', 'loss', 100)
+        v = Visualizator(
+            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_'+ str(
+                self.gamma_int), 'loss', 100)
+        train_loss = []
         with tf.Session() as sess:
             sess.run(init)  # run the initializer
             for epoch in range(1, n_epochs + 1):
@@ -169,21 +177,31 @@ class AutoencoderFC:
                     print("\r{}% ".format(100 * (iteration + 1) // n_batches), end="")
                     sys.stdout.flush()
 
-                    batch_x = self.data_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
+                    if self.params.method != 'imputation':
+                        batch_x = self.data_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
+                    else:
+                        batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
 
-                print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, self.gamma.eval()[0]))
+                train_loss.append(l)
 
+                print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, self.gamma.eval()))
+
+            v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
             test_loss = []
             for i in range(10):
-                batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
+                if self.params.method != 'imputation':
+                    batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
+                else:
+                    batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
                 g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
                 for j in range(self.params.nn):
                     v.draw_mnist_image(i, j, g, self.params.method)
                 test_loss.append(l_test)
 
+            v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
         return np.mean(test_loss)
 
 
@@ -194,37 +212,31 @@ def run_model():
     dataset_processor = DatasetProcessor(path='', dataset='mnist', width_mask=13, nn=100)
     X = dataset_processor.load_data()
     data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
-    p = AutoencoderFCParams(method='last_layer', dataset='mnist', num_sample=5)
-
     data_test = np.random.permutation(data_test)
     data_test, data_train = dataset_processor.change_background(data_test, data_train)
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
-    data_imputed = imp.fit_transform(data_train)
+    data_imputed_train = imp.fit_transform(data_train)
+    data_imputed_test = imp.fit_transform(data_test)
 
-    a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed=data_imputed)
-
-    a.autoencoder_main_loop(100)
+    hyper_params = {'num_sample': [1, 5, 10], 'epoch': [100, 175, 250], 'gamma': [0.0, 0.5, 1.0]}
+    methods = ['first_layer', 'last_layer', 'different_cost']
+    grid = ParameterGrid(hyper_params)
+    f = open('loss_results', "a")
+    for method in methods:
+        for params in grid:
+            print(method, params)
+            p = AutoencoderFCParams(method=method, dataset='mnist', num_sample=params['num_sample'])
+            a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
+                              data_imputed_test=data_imputed_test,
+                              gamma=params['gamma'])
+            loss = a.autoencoder_main_loop(params['epoch'])
+            print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + str(loss))
+            f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
+                    + str(params['epoch']) + str(params['gamma']) + 'result:' + str(loss))
+            f.write('\n')
+    f.close()
 
 
 run_model()
-
-#
-# def search_the_best_params():
-#     hyper_params = {'num_sample': [1, 5, 10], 'epoch': [100, 175, 250]}
-#     methods = ['last_layer']
-#     grid = ParameterGrid(hyper_params)
-#     results = {}
-#     f = open('loss_results', "a")
-#     for method in methods:
-#         for params in grid:
-#             print(method, params)
-#             p = AutoencoderFCParams(method=method, dataset='mnist', num_sample=params['num_sample'])
-#             a = AutoencoderFC(p)
-#             loss = a.autoencoder_main_loop(params['epoch'])
-#             print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + str(loss))
-#             f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
-#                     + str(params['epoch'])  + 'result:'+ str(loss) )
-#             f.write('\n')
-#     f.close()
