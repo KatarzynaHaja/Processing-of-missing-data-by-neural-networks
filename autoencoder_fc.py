@@ -154,9 +154,9 @@ class AutoencoderFC:
                            self.size[0] * self.params.num_sample:, :]
             y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
                            self.size[0] * self.params.num_sample:, :]
-            loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=2),
+            loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=1),
                                        axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
-            # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2))
+            # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2)) czy tutaj nie powinno być axis=1 zamiast axis=2 ???
             loss = loss_miss
 
         optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
@@ -165,7 +165,7 @@ class AutoencoderFC:
         init = tf.global_variables_initializer()
 
         v = Visualizator(
-            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_'+ str(
+            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
         train_loss = []
         with tf.Session() as sess:
@@ -186,9 +186,8 @@ class AutoencoderFC:
 
                 train_loss.append(l)
 
-                print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, self.gamma.eval()))
-
-            v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
+                # print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, self.gamma.eval()))
+            #v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
             test_loss = []
             for i in range(10):
                 if self.params.method != 'imputation':
@@ -197,11 +196,11 @@ class AutoencoderFC:
                     batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
                 g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-                for j in range(self.params.nn):
-                    v.draw_mnist_image(i, j, g, self.params.method)
+                # for j in range(self.params.nn):
+                #     v.draw_mnist_image(i, j, g, self.params.method)
                 test_loss.append(l_test)
 
-            v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
+            #v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
         return np.mean(test_loss)
 
 
@@ -220,10 +219,10 @@ def run_model():
     data_imputed_train = imp.fit_transform(data_train)
     data_imputed_test = imp.transform(data_test)
 
-    hyper_params = {'num_sample': [1, 5, 10], 'epoch': [100, 175, 250], 'gamma': [0.0, 0.5, 1.0]}
+    hyper_params = {'num_sample': [1, 5, 10], 'epoch': [150, 250], 'gamma': [0.0, 1.0, 2.0]}
     methods = ['first_layer', 'last_layer', 'different_cost']
     grid = ParameterGrid(hyper_params)
-    f = open('loss_results', "a")
+    f = open('loss_results_4', "a")
     for method in methods:
         for params in grid:
             print(method, params)
@@ -232,9 +231,10 @@ def run_model():
                               data_imputed_test=data_imputed_test,
                               gamma=params['gamma'])
             loss = a.autoencoder_main_loop(params['epoch'])
-            print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + str(loss))
+            print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + ',' + str(
+                params['gamma']) + ',' + str(loss))
             f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
-                    + str(params['epoch']) + str(params['gamma']) + 'result:' + str(loss))
+                    + str(params['epoch']) + ',' + str(params['gamma']) + 'result:' + str(loss))
             f.write('\n')
     f.close()
 

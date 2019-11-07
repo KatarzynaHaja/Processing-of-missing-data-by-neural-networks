@@ -95,8 +95,7 @@ class ClassificationFC:
         layer_2 = tf.nn.relu(
             tf.add(tf.matmul(layer_1, self.params.weights['h2']), self.params.biases['b2']))
 
-        layer_3 = tf.nn.softmax(
-            tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3']))
+        layer_3 = tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3'])
 
         if self.params.method != 'last_layer':
             return layer_3
