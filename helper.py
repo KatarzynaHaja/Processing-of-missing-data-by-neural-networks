@@ -1,0 +1,51 @@
+# from tensorflow.examples.tutorials.mnist import input_data
+# import matplotlib.pyplot as plt
+# X = input_data.read_data_sets("./data_mnist/", one_hot=True)
+# image = X.train.images[0]
+# plt.imshow(image.reshape(28, 28), origin="upper", cmap="gray")
+# plt.axis('off')
+# plt.savefig('mnist_example',  bbox_inches='tight', pad_inches=0)
+#
+# new_image = 1- image
+# plt.imshow(new_image.reshape(28,28), origin="upper", cmap="gray")
+# plt.axis('off')
+# plt.savefig('mnist_example_changed_background',  bbox_inches='tight', pad_inches=0)
+#
+# import numpy as np
+#
+#
+# def random_mask_mnist(width_window, margin=0):
+#     margin_left = margin
+#     margin_righ = margin
+#     margin_top = margin
+#     margin_bottom = margin
+#     start_width = margin_top + np.random.randint(28 - width_window - margin_top - margin_bottom)
+#     start_height = margin_left + np.random.randint(28 - width_window - margin_left - margin_righ)
+#
+#     return np.concatenate([28 * i + np.arange(start_height, start_height + width_window) for i in
+#                            np.arange(start_width, start_width + width_window)], axis=0).astype(np.int32)
+#
+#
+# def data_with_mask_mnist(x, width_window=10):
+#     h = width_window
+#     if width_window <= 0:
+#         h = np.random.randint(8, 20)
+#     mask = random_mask_mnist(h)
+#     x[mask] = 1
+#     return x
+#
+# image_with_patch = data_with_mask_mnist(new_image, 13)
+#
+# plt.imshow(new_image.reshape(28,28), origin="upper", cmap="gray")
+# plt.axis('off')
+# plt.savefig('mnist_example_with_patch',  bbox_inches='tight', pad_inches=0)
+
+
+import tensorflow_datasets as tfds
+dataset = tfds.load(name="svhn_cropped")
+print(dataset['train'])
+
+
+
+
+
