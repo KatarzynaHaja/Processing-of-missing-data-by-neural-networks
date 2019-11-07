@@ -1,0 +1,6 @@
+first_layer, num_sample:1, epoch:250,1.0result:0.02272085
+first_layer, num_sample:5, epoch:250,1.0result:0.016312812
+first_layer, num_sample:10, epoch:250,1.0result:0.015703771
+first_layer, num_sample:10, epoch:250,2.0result:0.0153854815
+last_layer, num_sample:10, epoch:250,1.0result:0.010846468
+last_layer, num_sample:10, epoch:250,2.0result:0.010902441
