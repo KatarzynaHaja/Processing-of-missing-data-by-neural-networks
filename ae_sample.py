@@ -85,8 +85,8 @@ class Sampling:
 
     def nr(self, output):
         reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
-        layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['encoder_h1']),
-                           self.params.biases['encoder_b1'])
+        layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['h1']),
+                           self.params.biases['b1'])
         layer_1_m = tf.nn.relu(layer_1_m)
 
         if self.method == 'first_layer':
@@ -96,7 +96,7 @@ class Sampling:
         if self.method != 'first_layer':
             return layer_1_m
 
-    def mean_sample(self, input):
-        unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], self.params.num_input))
+    def mean_sample(self, input, output_dim):
+        unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], output_dim))
         mean = tf.reduce_mean(unreshaped, axis=0)
         return mean

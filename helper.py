@@ -41,11 +41,18 @@
 # plt.savefig('mnist_example_with_patch',  bbox_inches='tight', pad_inches=0)
 
 
-import tensorflow_datasets as tfds
-dataset = tfds.load(name="svhn_cropped")
-print(dataset['train'])
+from processing_images import DatasetProcessor
+import matplotlib.pyplot as plt
 
+d = DatasetProcessor('svhn')
+data_train, data_test = d.load_data()
+data_train['X'] = d.reshape_data(data_train['X'])
+data_test['X'] = d.reshape_data(data_test['X'])
+data_train, data_test = d.mask_data(data_train, data_test)
 
+plt.imshow(data_train['X'][0].reshape(32, 32,3).astype('uint8'), origin="upper")
+plt.axis('off')
+plt.savefig('svhn_masked_example',  bbox_inches='tight', pad_inches=0)
 
 
 

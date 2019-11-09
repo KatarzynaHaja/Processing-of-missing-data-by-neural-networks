@@ -7,6 +7,7 @@ from visualization import Visualizator
 import numpy as np
 import sys
 import os
+import matplotlib.pyplot as plt
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -69,7 +70,10 @@ class AutoencoderFC:
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
-            self.gamma = tf.Variable(initial_value=self.gamma)
+            if self.params.method != 'theirs':
+                self.gamma = tf.Variable(initial_value=self.gamma)
+            else:
+                self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
 
     def divide_data_into_known_and_missing(self, x):
         check_isnan = tf.is_nan(x)
@@ -83,15 +87,90 @@ class AutoencoderFC:
     def encoder(self):
         if self.params.method != 'imputation':
             size = tf.shape(self.x_miss)
-            samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs, self.params.num_input,
-                                                     self.gamma)
-            layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']), self.params.biases['encoder_b1']))
 
-            layer_1_miss = self.sampling.nr(samples)
-            layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+            if self.params.method == 'theirs':
+                gamma = tf.abs(self.gamma)
+                gamma_ = tf.cond(tf.less(gamma[0], 1.), lambda: gamma, lambda: tf.pow(gamma, 2))
+                covs = tf.abs(self.covs)
+                p = tf.abs(self.p)
+                p = tf.div(p, tf.reduce_sum(p, axis=0))
 
-            layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
+                layer_1 = tf.nn.relu(tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']),
+                                            self.params.biases['encoder_b1']))
+
+                where_isnan = tf.is_nan(self.x_miss)
+                where_isfinite = tf.is_finite(self.x_miss)
+
+                weights2 = tf.square(self.params.weights['encoder_h1'])
+
+                Q = []
+                layer_1_miss = tf.zeros([size[0], self.params.num_hidden_1])
+                for i in range(self.n_distribution):
+                    data_miss = tf.where(where_isnan, tf.reshape(tf.tile(self.means[i, :], [size[0]]), [-1, size[1]]),
+                                         self.x_miss)
+                    miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[i, :], [size[0]]), [-1, size[1]]),
+                                        tf.zeros([size[0], size[1]]))
+
+                    layer_1_m = tf.add(tf.matmul(data_miss, self.params.weights['encoder_h1']),
+                                       self.params.biases['encoder_b1'])
+
+                    layer_1_m = tf.div(layer_1_m, tf.sqrt(tf.matmul(miss_cov, weights2)))
+                    layer_1_m = tf.div(tf.exp(tf.div(-tf.pow(layer_1_m, 2), 2.)), np.sqrt(2 * np.pi)) + tf.multiply(
+                        tf.div(layer_1_m, 2.), 1 + tf.erf(
+                            tf.div(layer_1_m, np.sqrt(2))))
+
+                    layer_1_miss = tf.cond(tf.equal(tf.constant(i), tf.constant(0)),
+                                           lambda: tf.add(layer_1_miss, layer_1_m),
+                                           lambda: tf.concat((layer_1_miss, layer_1_m), axis=0))
+
+                    norm = tf.subtract(data_miss, self.means[i, :])
+                    norm = tf.square(norm)
+                    q = tf.where(where_isfinite,
+                                 tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [size[0]]), [-1, size[1]]),
+                                 tf.ones_like(self.x_miss))
+                    norm = tf.div(norm, q)
+                    norm = tf.reduce_sum(norm, axis=1)
+
+                    q = tf.log(q)
+                    q = tf.reduce_sum(q, axis=1)
+
+                    q = tf.add(q, norm)
+
+                    norm = tf.cast(tf.reduce_sum(tf.cast(where_isfinite, tf.int32), axis=1), tf.float32)
+                    norm = tf.multiply(norm, tf.log(2 * np.pi))
+
+                    q = tf.add(q, norm)
+                    q = tf.multiply(q, -0.5)
+
+                    Q = tf.concat((Q, q), axis=0)
+
+                Q = tf.reshape(Q, shape=(self.n_distribution, -1))
+                Q = tf.add(Q, tf.log(p))
+                Q = tf.subtract(Q, tf.reduce_max(Q, axis=0))
+                Q = tf.where(Q < -20, tf.multiply(tf.ones_like(Q), -20), Q)
+                Q = tf.exp(Q)
+                Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
+                Q = tf.reshape(Q, shape=(-1, 1))
+
+                layer_1_miss = tf.multiply(layer_1_miss, Q)
+                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.n_distribution, size[0], self.params.num_hidden_1))
+                layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
+
+                # join layer for data_rbfn with missing values with layer for data_rbfn without missing values
+                layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
+            else:
+
+                samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
+                                                         self.params.num_input,
+                                                         self.gamma)
+                layer_1 = tf.nn.relu(
+                    tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']),
+                           self.params.biases['encoder_b1']))
+
+                layer_1_miss = self.sampling.nr(samples)
+                layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+
+                layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
         if self.params.method == 'imputation':
             layer_1 = tf.nn.relu(
@@ -117,7 +196,7 @@ class AutoencoderFC:
 
         if self.params.method == 'last_layer':
             input = layer_3[:self.size[0] * self.params.num_sample, :]
-            mean = self.sampling.mean_sample(input)
+            mean = self.sampling.mean_sample(input, self.params.num_input)
             return mean
 
     def autoencoder_main_loop(self, n_epochs):
@@ -186,21 +265,36 @@ class AutoencoderFC:
 
                 train_loss.append(l)
 
-                # print('Step {:d}: Minibatch Loss: {:.8f}, gamma: {:.4f}'.format(epoch, l, self.gamma.eval()))
-            #v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
+            v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
             test_loss = []
-            for i in range(10):
-                if self.params.method != 'imputation':
-                    batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
-                else:
-                    batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
+            if self.params.dataset == 'mnist':
+                for i in range(10):
+                    if self.params.method != 'imputation':
+                        batch_x = self.data_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
+                    else:
+                        batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
-                g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-                # for j in range(self.params.nn):
-                #     v.draw_mnist_image(i, j, g, self.params.method)
-                test_loss.append(l_test)
+                    g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
+                    for j in range(self.params.nn):
+                        v.draw_mnist_image(i, j, g, self.params.method)
+                    test_loss.append(l_test)
+            if self.params.dataset == 'svhn':
+                n = 16
+                for i in range(n):
+                    if self.params.method != 'imputation':
+                        batch_x = self.data_test[
+                                  (i * self.data_test.shape[0] / n):((i + 1) * self.data_test.shape[0] / n), :]
+                    else:
+                        batch_x = self.data_imputed_test[
+                                  (i * self.data_test.shape[0] / n):((i + 1) * self.data_test.shape[0] / n), :]
 
-            #v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
+                    g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
+
+                    for j in range(self.data_test.shape[0] / n):
+                        v.draw_mnist_image(i, j, g, self.params.method)
+                    test_loss.append(l_test)
+
+            v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
         return np.mean(test_loss)
 
 
@@ -208,25 +302,31 @@ from sklearn.model_selection import ParameterGrid
 
 
 def run_model():
-    dataset_processor = DatasetProcessor(path='', dataset='mnist', width_mask=13, nn=100)
-    X = dataset_processor.load_data()
-    data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
-    data_test = np.random.permutation(data_test)
-    data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    data_test, data_train = dataset_processor.mask_data(data_test, data_train)
+    # dataset_processor = DatasetProcessor(dataset='mnist')
+    # X = dataset_processor.load_data()
+    # data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
+    # data_test = np.random.permutation(data_test)
+    # data_test, data_train = dataset_processor.change_background(data_test, data_train)
+    # data_test, data_train = dataset_processor.mask_data(data_test, data_train)
+
+    d = DatasetProcessor('svhn')
+    data_train, data_test = d.load_data()
+    data_train['X'] = d.reshape_data(data_train['X'])
+    data_test['X'] = d.reshape_data(data_test['X'])
+    data_train, data_test = d.mask_data(data_train, data_test)
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
-    data_imputed_train = imp.fit_transform(data_train)
-    data_imputed_test = imp.transform(data_test)
+    data_imputed_train = imp.fit_transform(data_train['X'])
+    data_imputed_test = imp.transform(data_test['X'])
 
-    hyper_params = {'num_sample': [1, 5, 10], 'epoch': [150, 250], 'gamma': [0.0, 1.0, 2.0]}
-    methods = ['first_layer', 'last_layer', 'different_cost']
+    hyper_params = {'num_sample': [10], 'epoch': [150], 'gamma': [1.0]}
+    methods = ['imputation']
     grid = ParameterGrid(hyper_params)
     f = open('loss_results_4', "a")
     for method in methods:
         for params in grid:
             print(method, params)
-            p = AutoencoderFCParams(method=method, dataset='mnist', num_sample=params['num_sample'])
+            p = AutoencoderFCParams(method=method, dataset='svhn', num_sample=params['num_sample'])
             a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                               data_imputed_test=data_imputed_test,
                               gamma=params['gamma'])
@@ -239,4 +339,63 @@ def run_model():
     f.close()
 
 
+def run_the_best():
+    dataset_processor = DatasetProcessor(path='', dataset='mnist', width_mask=13, nn=100)
+    X = dataset_processor.load_data()
+    data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
+    data_test = np.random.permutation(data_test)
+    data_test, data_train = dataset_processor.change_background(data_test, data_train)
+    for j in range(1000):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+        ax.axis('off')
+        plt.savefig(os.path.join('original_data', "".join(
+            (str(j) + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
+
+    data_test, data_train = dataset_processor.mask_data(data_test, data_train)
+
+    for j in range(1000):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+        ax.axis('off')
+        plt.savefig(os.path.join('image_with_patch', "".join(
+            (str(j) + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
+
+    imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
+    data_imputed_train = imp.fit_transform(data_train)
+    data_imputed_test = imp.transform(data_test)
+
+    params = [{'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
+              {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 0.0},
+                                                  {'num_sample': 20, 'epoch': 150, 'gamma': 0.0},
+                                                  {'num_sample': 10, 'epoch': 150, 'gamma': 0.0},
+                                                  {'num_sample': 20, 'epoch': 150, 'gamma': 1.0}]},
+              {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 1.0},
+                                                   {'num_sample': 20, 'epoch': 150, 'gamma': 1.0}]},
+              {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 2.0}]},
+
+              {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
+
+              ]
+    f = open('loss_results_the_best', "a")
+    for i in params:
+        for params in i['params']:
+            p = AutoencoderFCParams(method=i['method'], dataset='mnist', num_sample=params['num_sample'])
+            a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
+                              data_imputed_test=data_imputed_test,
+                              gamma=params['gamma'])
+            loss = a.autoencoder_main_loop(params['epoch'])
+            print(i['method'] + "," + str(params['num_sample']) + ',' + str(params['epoch']) + ',' + str(
+                params['gamma']) + ',' + str(loss))
+            f.write(i['method'] + ", num_sample:" + str(params['num_sample']) + ', epoch:'
+                    + str(params['epoch']) + ',' + str(params['gamma']) + 'result:' + str(loss))
+            f.write('\n')
+    f.close()
+
+
+# run_the_best()
 run_model()

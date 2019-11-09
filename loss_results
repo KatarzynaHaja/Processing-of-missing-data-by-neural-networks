@@ -36,3 +36,8 @@ first_layer, num_sample:10, epoch:1000.0result:0.014543357
 first_layer, num_sample:1, epoch:1000.5result:0.023456287
 first_layer, num_sample:5, epoch:1000.5result:0.016000694
 first_layer, num_sample:10, epoch:1000.5result:0.015369306
+imputation, num_sample:10, epoch:11.0result:2.3036056
+imputation, num_sample:10, epoch:11.0result:2.3033018
+imputation, num_sample:10, epoch:11.0result:1.9022593
+imputation, num_sample:10, epoch:2501.0result:1.7643797
+first_layer,1,10.0,0.1021
