@@ -26,6 +26,14 @@ class Visualizator:
                     bbox_inches='tight')
         plt.close()
 
+    def draw_svhn_image(self, i, j, g, method):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(g[j].reshape([32, 32, 3]), origin="upper")
+        ax.axis('off')
+        plt.savefig(os.path.join(self.save_dir, "".join(
+            (str(i * self.nn + j), '-' + method + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
 
 
 

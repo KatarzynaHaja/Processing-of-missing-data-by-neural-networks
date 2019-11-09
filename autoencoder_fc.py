@@ -18,7 +18,7 @@ class AutoencoderFCParams:
         self.num_hidden_1 = 256  # 1st layer num features
         self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
         self.num_hidden_3 = 64  # 3nd layer num features (the latent dim)
-        self.num_input = 784  # MNIST data_rbfn input (img shape: 28*28)
+        self.num_input = 784 if dataset == 'mnist' else 3072
 
         self.nn = 100
         self.method = method
@@ -73,7 +73,8 @@ class AutoencoderFC:
             if self.params.method != 'theirs':
                 self.gamma = tf.Variable(initial_value=self.gamma)
             else:
-                self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
+                self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.),
+                                         dtype=tf.float32)
 
     def divide_data_into_known_and_missing(self, x):
         check_isnan = tf.is_nan(x)
@@ -155,9 +156,8 @@ class AutoencoderFC:
                 layer_1_miss = tf.multiply(layer_1_miss, Q)
                 layer_1_miss = tf.reshape(layer_1_miss, shape=(self.n_distribution, size[0], self.params.num_hidden_1))
                 layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
-
-                # join layer for data_rbfn with missing values with layer for data_rbfn without missing values
                 layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
+
             else:
 
                 samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
@@ -228,11 +228,6 @@ class AutoencoderFC:
                           :self.size[0] * self.params.num_sample, :]
             y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
                           :self.size[0] * self.params.num_sample, :]
-
-            y_pred_known = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[
-                           self.size[0] * self.params.num_sample:, :]
-            y_true_known = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
-                           self.size[0] * self.params.num_sample:, :]
             loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=1),
                                        axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
             # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2)) czy tutaj nie powinno być axis=1 zamiast axis=2 ???
@@ -240,15 +235,14 @@ class AutoencoderFC:
 
         optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
-        # Initialize the variables (i.e. assign their default value)
         init = tf.global_variables_initializer()
 
         v = Visualizator(
             'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
-        train_loss = []
+
         with tf.Session() as sess:
-            sess.run(init)  # run the initializer
+            sess.run(init)
             for epoch in range(1, n_epochs + 1):
                 n_batches = self.data_train.shape[0] // batch_size
                 l = np.inf
@@ -263,9 +257,6 @@ class AutoencoderFC:
 
                     _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
 
-                train_loss.append(l)
-
-            v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'koszt_treningowy')
             test_loss = []
             if self.params.dataset == 'mnist':
                 for i in range(10):
@@ -278,46 +269,48 @@ class AutoencoderFC:
                     for j in range(self.params.nn):
                         v.draw_mnist_image(i, j, g, self.params.method)
                     test_loss.append(l_test)
+
             if self.params.dataset == 'svhn':
                 n = 16
                 for i in range(n):
                     if self.params.method != 'imputation':
                         batch_x = self.data_test[
-                                  (i * self.data_test.shape[0] / n):((i + 1) * self.data_test.shape[0] / n), :]
+                                  (i * (self.data_test.shape[0]) // n):((i + 1) * (self.data_test.shape[0] // n)), :]
                     else:
                         batch_x = self.data_imputed_test[
-                                  (i * self.data_test.shape[0] / n):((i + 1) * self.data_test.shape[0] / n), :]
+                                  (i * (self.data_test.shape[0] // n)):((i + 1) * (self.data_test.shape[0] // n)), :]
 
                     g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
 
-                    for j in range(self.data_test.shape[0] / n):
-                        v.draw_mnist_image(i, j, g, self.params.method)
+                    for j in range(self.data_test.shape[0] // n):
+                        v.draw_svhn_image(i, j, g, self.params.method)
                     test_loss.append(l_test)
 
-            v.plot_loss(test_loss, [i for i in range(10)], 'Koszt testowy', 'koszt_testowy')
         return np.mean(test_loss)
 
 
 from sklearn.model_selection import ParameterGrid
 
 
-def run_model():
-    # dataset_processor = DatasetProcessor(dataset='mnist')
-    # X = dataset_processor.load_data()
-    # data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
-    # data_test = np.random.permutation(data_test)
-    # data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    # data_test, data_train = dataset_processor.mask_data(data_test, data_train)
+def run_model(dataset):
+    if dataset == 'mnist':
+        dataset_processor = DatasetProcessor(dataset='mnist')
+        X = dataset_processor.load_data()
+        data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
+        data_test = np.random.permutation(data_test)
+        data_test, data_train = dataset_processor.change_background(data_test, data_train)
+        data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    d = DatasetProcessor('svhn')
-    data_train, data_test = d.load_data()
-    data_train['X'] = d.reshape_data(data_train['X'])
-    data_test['X'] = d.reshape_data(data_test['X'])
-    data_train, data_test = d.mask_data(data_train, data_test)
+    if dataset == 'svhn':
+        d = DatasetProcessor('svhn')
+        data_train, data_test, labels_train, labels_test = d.load_data()
+        data_train = d.reshape_data(data_train)
+        data_test = d.reshape_data(data_test)
+        data_train, data_test = d.mask_data(data_train, data_test)
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
-    data_imputed_train = imp.fit_transform(data_train['X'])
-    data_imputed_test = imp.transform(data_test['X'])
+    data_imputed_train = imp.fit_transform(data_train)
+    data_imputed_test = imp.transform(data_test)
 
     hyper_params = {'num_sample': [10], 'epoch': [150], 'gamma': [1.0]}
     methods = ['imputation']
@@ -398,4 +391,4 @@ def run_the_best():
 
 
 # run_the_best()
-run_model()
+run_model('svhn')

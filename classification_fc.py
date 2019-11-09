@@ -14,9 +14,8 @@ class ClassificationFCParams:
     def __init__(self, method, dataset, num_sample=None, ):
         initializer = tf.contrib.layers.variance_scaling_initializer()
         self.num_input = 784
-        self.num_hidden_1 = 256
-        self.num_hidden_2 = 128  # 1st layer num features
-        self.num_hidden_3 = 64  # 2nd layer num features (the latent dim)
+        self.num_hidden_1 = 128  # 1st layer num features
+        self.num_hidden_2 = 64  # 2nd layer num features (the latent dim)
         self.num_output = 10
 
         self.nn = 100
@@ -27,14 +26,12 @@ class ClassificationFCParams:
         self.weights = {
             'h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
             'h2': tf.Variable(initializer([self.num_hidden_1, self.num_hidden_2])),
-            'h3': tf.Variable(initializer([self.num_hidden_2, self.num_hidden_3])),
-            'h4' : tf.Variable(initializer([self.num_hidden_2, self.num_output]))
+            'h3': tf.Variable(initializer([self.num_hidden_2, self.num_output])),
         }
         self.biases = {
             'b1': tf.Variable(tf.random_normal([self.num_hidden_1])),
             'b2': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'b3': tf.Variable(tf.random_normal([self.num_hidden_3])),
-            'b4':  tf.Variable(tf.random_normal([self.num_output])),
+            'b3': tf.Variable(tf.random_normal([self.num_output])),
         }
 
 
@@ -87,7 +84,6 @@ class ClassificationFC:
 
     def model(self):
         if self.params.method != 'imputation':
-            size = tf.shape(self.x_miss)
             if self.params.method == 'theirs':
                 gamma = tf.abs(self.gamma)
                 gamma_ = tf.cond(tf.less(gamma[0], 1.), lambda: gamma, lambda: tf.pow(gamma, 2))
@@ -104,12 +100,14 @@ class ClassificationFC:
                 weights2 = tf.square(self.params.weights['h1'])
 
                 Q = []
-                layer_1_miss = tf.zeros([size[0], self.params.num_hidden_1])
+                layer_1_miss = tf.zeros([self.size[0], self.params.num_hidden_1])
                 for i in range(self.n_distribution):
-                    data_miss = tf.where(where_isnan, tf.reshape(tf.tile(self.means[i, :], [size[0]]), [-1, size[1]]),
+                    data_miss = tf.where(where_isnan,
+                                         tf.reshape(tf.tile(self.means[i, :], [self.size[0]]), [-1, size[1]]),
                                          self.x_miss)
-                    miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[i, :], [size[0]]), [-1, size[1]]),
-                                        tf.zeros([size[0], size[1]]))
+                    miss_cov = tf.where(where_isnan,
+                                        tf.reshape(tf.tile(covs[i, :], [self.size[0]]), [-1, self.size[1]]),
+                                        tf.zeros([self.size[0], self.size[1]]))
 
                     layer_1_m = tf.add(tf.matmul(data_miss, self.params.weights['h1']),
                                        self.params.biases['b1'])
@@ -126,7 +124,7 @@ class ClassificationFC:
                     norm = tf.subtract(data_miss, self.means[i, :])
                     norm = tf.square(norm)
                     q = tf.where(where_isfinite,
-                                 tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [size[0]]), [-1, size[1]]),
+                                 tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [self.size[0]]), [-1, self.size[1]]),
                                  tf.ones_like(self.x_miss))
                     norm = tf.div(norm, q)
                     norm = tf.reduce_sum(norm, axis=1)
@@ -153,7 +151,8 @@ class ClassificationFC:
                 Q = tf.reshape(Q, shape=(-1, 1))
 
                 layer_1_miss = tf.multiply(layer_1_miss, Q)
-                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.n_distribution, size[0], self.params.num_hidden_1))
+                layer_1_miss = tf.reshape(layer_1_miss,
+                                          shape=(self.n_distribution, self.size[0], self.params.num_hidden_1))
                 layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
 
                 layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
@@ -167,7 +166,7 @@ class ClassificationFC:
                            self.params.biases['b1']))
 
                 layer_1_miss = self.sampling.nr(samples)
-                layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.size[0], self.params.num_hidden_1))
 
                 layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
@@ -179,21 +178,17 @@ class ClassificationFC:
         layer_2 = tf.nn.relu(
             tf.add(tf.matmul(layer_1, self.params.weights['h2']), self.params.biases['b2']))
 
-        layer_3 = tf.nn.relu(
-            tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3']))
-
-
-        layer_4 = tf.add(tf.matmul(layer_3, self.params.weights['h4']), self.params.biases['b4'])
+        layer_3 = tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3'])
 
         if self.params.method != 'last_layer':
             return layer_3
 
         if self.params.method == 'last_layer':
-            input = layer_4[:self.size[0] * self.params.num_sample, :]
+            input = layer_3[:self.size[0] * self.params.num_sample, :]
             mean = self.sampling.mean_sample(input, self.params.num_output)
             return mean
 
-        return layer_4
+        return layer_3
 
     def main_loop(self, n_epochs):
         learning_rate = 0.01
@@ -220,7 +215,7 @@ class ClassificationFC:
             labels = tf.reshape(labels, shape=(self.params.num_sample * self.size[0], 10))
 
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                labels=self.labels,
+                labels=labels,
                 logits=y_pred,
             ))
 
@@ -284,7 +279,7 @@ def run_model():
     data_imputed_test = imp.transform(data_test).reshape(data_test.shape[0], 784)
 
     hyper_params = {'num_sample': [10], 'epoch': [150], 'gamma': [1.0]}
-    methods = ['first_layer', 'theirs']
+    methods = ['first_layer']
     grid = ParameterGrid(hyper_params)
     f = open('loss_results_classification', "a")
     for method in methods:
