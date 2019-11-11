@@ -103,7 +103,7 @@ class ClassificationFC:
                 layer_1_miss = tf.zeros([self.size[0], self.params.num_hidden_1])
                 for i in range(self.n_distribution):
                     data_miss = tf.where(where_isnan,
-                                         tf.reshape(tf.tile(self.means[i, :], [self.size[0]]), [-1, size[1]]),
+                                         tf.reshape(tf.tile(self.means[i, :], [self.size[0]]), [-1, self.size[1]]),
                                          self.x_miss)
                     miss_cov = tf.where(where_isnan,
                                         tf.reshape(tf.tile(covs[i, :], [self.size[0]]), [-1, self.size[1]]),
@@ -201,10 +201,12 @@ class ClassificationFC:
         y_pred = self.model()  # prediction
 
         if self.params.method != 'different_cost':
-            loss = tf.nn.softmax_cross_entropy_with_logits(
+            loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                 labels=self.labels,
                 logits=y_pred
             )
+
+            loss = tf.reduce_mean(loss)
 
             acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
                                               predictions=tf.argmax(y_pred, 1))
@@ -214,7 +216,7 @@ class ClassificationFC:
             labels = tf.tile(labels, [self.params.num_sample, 1, 1])
             labels = tf.reshape(labels, shape=(self.params.num_sample * self.size[0], 10))
 
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
                 labels=labels,
                 logits=y_pred,
             ))
@@ -278,8 +280,8 @@ def run_model():
     data_imputed_train = imp.fit_transform(data_train).reshape(data_train.shape[0], 784)
     data_imputed_test = imp.transform(data_test).reshape(data_test.shape[0], 784)
 
-    hyper_params = {'num_sample': [10], 'epoch': [150], 'gamma': [1.0]}
-    methods = ['first_layer']
+    hyper_params = {'num_sample': [20], 'epoch': [250], 'gamma': [0.0]}
+    methods = ['last_layer', 'theirs', 'imputation']
     grid = ParameterGrid(hyper_params)
     f = open('loss_results_classification', "a")
     for method in methods:
