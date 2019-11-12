@@ -12,14 +12,17 @@ from visualization import Visualizator
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
-class ClassificationFCParams:
-    def __init__(self, method, dataset, num_sample=None, ):
+class ClassificationCNNParams:
+    def __init__(self, method, dataset, num_sample=None):
         initializer = tf.contrib.layers.variance_scaling_initializer()
+
+        #TODO: Change params to CNN's params.
         self.num_input = 784
-        self.num_hidden_1 = 256  # 1st layer num features
+        self.num_hidden_1 = (32,32,3)  # 1st layer num features
         self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
         self.num_output = 10
 
+        self.nn = 100
         self.method = method
         self.dataset = dataset
         self.num_sample = num_sample
@@ -289,12 +292,12 @@ def run_model():
 
     params = [{'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
               {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0},
-                                                  {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
+                                                  {'num_sample': 20, 'epoch': 250, 'gamma': 1.0},
                                                   {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
               {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
 
               ]
-    f = open('loss_results_classification_fc', "a")
+    f = open('loss_results_classification', "a")
     for eleme in params:
         for param in eleme['params']:
             p = ClassificationFCParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])

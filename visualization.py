@@ -4,7 +4,7 @@ import pathlib
 
 
 class Visualizator:
-    def __init__(self, save_dir, file_name, nn):
+    def __init__(self, save_dir, file_name, nn=None):
         self.save_dir = save_dir
         self.file_name = file_name
         self.nn = nn
@@ -12,6 +12,8 @@ class Visualizator:
         pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     def plot_loss(self, loss, epochs, title, file_name):
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
         plt.plot(epochs, loss)
         plt.title(title)
         plt.savefig(os.path.join(self.save_dir, file_name))
