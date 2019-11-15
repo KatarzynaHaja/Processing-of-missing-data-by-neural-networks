@@ -287,10 +287,11 @@ def run_model():
     data_imputed_train = imp.fit_transform(data_train).reshape(data_train.shape[0], 784)
     data_imputed_test = imp.transform(data_test).reshape(data_test.shape[0], 784)
 
-    params = [{'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
-              {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0},
-                                                  {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
-                                                  {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
+    params = [
+    #           {'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
+    #           {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0},
+    #                                               {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
+    #                                               {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
               {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
 
               ]
