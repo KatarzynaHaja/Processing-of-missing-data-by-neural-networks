@@ -1,0 +1,12 @@
+last_layer, num_sample:10, epoch:150,0.0result:0.011047386
+last_layer, num_sample:10, epoch:150,0.0result:0.010913698
+last_layer, num_sample:10, epoch:150,0.0result:0.011416994
+theirs, num_sample:1, epoch:250,0.0result:0.0052325632
+last_layer, num_sample:10, epoch:150,0.0result:0.010992592
+last_layer, num_sample:20, epoch:150,0.0result:0.008187881
+last_layer, num_sample:10, epoch:150,0.0result:0.01119384
+last_layer, num_sample:20, epoch:150,1.0result:0.008921225
+first_layer, num_sample:10, epoch:150,1.0result:0.014869367
+first_layer, num_sample:20, epoch:150,1.0result:0.014359501
+different_cost, num_sample:10, epoch:250,2.0result:0.015970483
+imputation, num_sample:1, epoch:250,0.0result:0.014886782
