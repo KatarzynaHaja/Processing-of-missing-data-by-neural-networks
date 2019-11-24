@@ -135,7 +135,7 @@ class ClassificationFC:
         return layer
 
     def main_loop(self, n_epochs):
-        learning_rate = 0.01
+        learning_rate = 0.001
         batch_size = 64
 
         loss = None
@@ -165,6 +165,9 @@ class ClassificationFC:
                 logits=y_pred,
             ))
 
+            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
+                                              predictions=tf.argmax(y_pred, 1))
+
         optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
         init = tf.global_variables_initializer()
@@ -190,8 +193,9 @@ class ClassificationFC:
                     else:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
+
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
-                    _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x, self.labels: labels})
+                    _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
 
                 print('Loss:', l)
 
@@ -229,10 +233,12 @@ def run_model():
 
     params = [
         {'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0},
-                                            {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
-                                            {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
+        # {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 1.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0}]},
+        #                                     {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
+        #                                     {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]}
+        # {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.5}]}
 
     ]
     f = open('loss_results_classification_fc', "a")
