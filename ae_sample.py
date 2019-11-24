@@ -7,7 +7,7 @@ tfd = tfp.distributions
 
 class Sampling:
     def __init__(self, num_sample, params, x_miss, n_distribution, method):
-        self.num_sample = num_sample  # 10
+        self.num_sample = num_sample
         self.params = params
         self.x_miss = x_miss
         self.size = tf.shape(x_miss)
@@ -83,16 +83,13 @@ class Sampling:
                               lambda: tf.concat((samples, sample), axis=0))
         return samples
 
-    def nr(self, output):
+    def nr(self, output, weights, bias):
         reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
-        layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['h1']),
-                           self.params.biases['b1'])
+        layer_1_m = tf.add(tf.matmul(reshaped_output, weights), bias)
         layer_1_m = tf.nn.relu(layer_1_m)
 
         if self.method == 'first_layer':
-            unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))
-            mean = tf.reduce_mean(unreshaped, 0)
-            return mean
+            return self.mean_sample(layer_1_m, self.params.num_hidden_1)
         if self.method != 'first_layer':
             return layer_1_m
 

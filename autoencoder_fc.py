@@ -8,39 +8,32 @@ import numpy as np
 import sys
 import os
 import matplotlib.pyplot as plt
+from layer_builder import LayerBuilder
+import analitic_method
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class AutoencoderFCParams:
-    def __init__(self, method, dataset, num_sample=None, ):
-        initializer = tf.contrib.layers.variance_scaling_initializer()
+    def __init__(self, method, dataset, num_sample=None, num_layer_decoder=3, num_layer_encoder=3):
         self.num_hidden_1 = 256  # 1st layer num features
         self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
         self.num_hidden_3 = 64  # 3nd layer num features (the latent dim)
         self.num_input = 784 if dataset == 'mnist' else 3072
-
+        self.num_layer_decoder = num_layer_decoder
+        self.num_layer_encoder = num_layer_encoder
         self.nn = 100
         self.method = method
         self.dataset = dataset
         self.num_sample = num_sample
+        self.n_distribution = 5  # number of n_distribution
 
-        self.weights = {
-            'encoder_h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
-            'encoder_h2': tf.Variable(initializer([self.num_hidden_1, self.num_hidden_2])),
-            'encoder_h3': tf.Variable(initializer([self.num_hidden_2, self.num_hidden_3])),
-            'decoder_h1': tf.Variable(initializer([self.num_hidden_3, self.num_hidden_2])),
-            'decoder_h2': tf.Variable(initializer([self.num_hidden_2, self.num_hidden_1])),
-            'decoder_h3': tf.Variable(initializer([self.num_hidden_1, self.num_input])),
-        }
-        self.biases = {
-            'encoder_b1': tf.Variable(tf.random_normal([self.num_hidden_1])),
-            'encoder_b2': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'encoder_b3': tf.Variable(tf.random_normal([self.num_hidden_3])),
-            'decoder_b1': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'decoder_b2': tf.Variable(tf.random_normal([self.num_hidden_1])),
-            'decoder_b3': tf.Variable(tf.random_normal([self.num_input])),
-        }
+        self.layer_inputs_encoder = [self.num_input, self.num_hidden_1, self.num_hidden_2]
+        self.layer_outputs_encoder = [self.num_hidden_1, self.num_hidden_2, self.num_hidden_3]
+
+        self.layer_inputs_decoder = [self.num_hidden_3, self.num_hidden_2, self.num_hidden_1]
+        self.layer_outputs_decoder = [self.num_hidden_2, self.num_hidden_1, self.num_input]
+
 
 
 class AutoencoderFC:
@@ -50,7 +43,7 @@ class AutoencoderFC:
         self.data_imputed_train = data_imputed_train
         self.data_imputed_test = data_imputed_test
         self.params = params
-        self.n_distribution = 5  # number of n_distribution
+        self.layer_builder = LayerBuilder(params)
         self.X = tf.placeholder("float", [None, self.params.num_input])
         self.original = tf.placeholder("float", [None, self.params.num_input])
         self.gamma = gamma
@@ -59,14 +52,15 @@ class AutoencoderFC:
         self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
         self.size = tf.shape(self.x_miss)
 
-        if self.params.method != 'imputation':
+        if self.params.method not in ['imputation', 'theirs']:
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
-                                     n_distribution=self.n_distribution,
+                                     n_distribution=self.params.n_distribution,
                                      method=self.params.method)
 
     def set_variables(self):
         if self.params.method != 'imputation':
-            gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(self.data_imputed_train)
+            gmm = GaussianMixture(n_components=self.params.n_distribution, covariance_type='diag').fit(
+                self.data_imputed_train)
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
@@ -87,115 +81,47 @@ class AutoencoderFC:
 
     def encoder(self):
         if self.params.method != 'imputation':
-            size = tf.shape(self.x_miss)
-
+            layer_1 = self.layer_builder.build_layer(self.x_known, self.params.layer_inputs_encoder[0],
+                                                     self.params.layer_outputs_encoder[0], 'relu')
             if self.params.method == 'theirs':
-                gamma = tf.abs(self.gamma)
-                gamma_ = tf.cond(tf.less(gamma[0], 1.), lambda: gamma, lambda: tf.pow(gamma, 2))
-                covs = tf.abs(self.covs)
-                p = tf.abs(self.p)
-                p = tf.div(p, tf.reduce_sum(p, axis=0))
-
-                layer_1 = tf.nn.relu(tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']),
-                                            self.params.biases['encoder_b1']))
-
-                where_isnan = tf.is_nan(self.x_miss)
-                where_isfinite = tf.is_finite(self.x_miss)
-
-                weights2 = tf.square(self.params.weights['encoder_h1'])
-
-                Q = []
-                layer_1_miss = tf.zeros([size[0], self.params.num_hidden_1])
-                for i in range(self.n_distribution):
-                    data_miss = tf.where(where_isnan, tf.reshape(tf.tile(self.means[i, :], [size[0]]), [-1, size[1]]),
-                                         self.x_miss)
-                    miss_cov = tf.where(where_isnan, tf.reshape(tf.tile(covs[i, :], [size[0]]), [-1, size[1]]),
-                                        tf.zeros([size[0], size[1]]))
-
-                    layer_1_m = tf.add(tf.matmul(data_miss, self.params.weights['encoder_h1']),
-                                       self.params.biases['encoder_b1'])
-
-                    layer_1_m = tf.div(layer_1_m, tf.sqrt(tf.matmul(miss_cov, weights2)))
-                    layer_1_m = tf.div(tf.exp(tf.div(-tf.pow(layer_1_m, 2), 2.)), np.sqrt(2 * np.pi)) + tf.multiply(
-                        tf.div(layer_1_m, 2.), 1 + tf.erf(
-                            tf.div(layer_1_m, np.sqrt(2))))
-
-                    layer_1_miss = tf.cond(tf.equal(tf.constant(i), tf.constant(0)),
-                                           lambda: tf.add(layer_1_miss, layer_1_m),
-                                           lambda: tf.concat((layer_1_miss, layer_1_m), axis=0))
-
-                    norm = tf.subtract(data_miss, self.means[i, :])
-                    norm = tf.square(norm)
-                    q = tf.where(where_isfinite,
-                                 tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [size[0]]), [-1, size[1]]),
-                                 tf.ones_like(self.x_miss))
-                    norm = tf.div(norm, q)
-                    norm = tf.reduce_sum(norm, axis=1)
-
-                    q = tf.log(q)
-                    q = tf.reduce_sum(q, axis=1)
-
-                    q = tf.add(q, norm)
-
-                    norm = tf.cast(tf.reduce_sum(tf.cast(where_isfinite, tf.int32), axis=1), tf.float32)
-                    norm = tf.multiply(norm, tf.log(2 * np.pi))
-
-                    q = tf.add(q, norm)
-                    q = tf.multiply(q, -0.5)
-
-                    Q = tf.concat((Q, q), axis=0)
-
-                Q = tf.reshape(Q, shape=(self.n_distribution, -1))
-                Q = tf.add(Q, tf.log(p))
-                Q = tf.subtract(Q, tf.reduce_max(Q, axis=0))
-                Q = tf.where(Q < -20, tf.multiply(tf.ones_like(Q), -20), Q)
-                Q = tf.exp(Q)
-                Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
-                Q = tf.reshape(Q, shape=(-1, 1))
-
-                layer_1_miss = tf.multiply(layer_1_miss, Q)
-                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.n_distribution, size[0], self.params.num_hidden_1))
-                layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
-                layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
-
+                layer_1 = analitic_method.nr(self.gamma, self.covs, self.p, self.params, self.means,
+                                             self.x_miss, self.x_known, self.layer_builder.weights_1_layer,
+                                             self.layer_builder.bias_1_layer)
             else:
-
                 samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
                                                          self.params.num_input,
                                                          self.gamma)
-                layer_1 = tf.nn.relu(
-                    tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']),
-                           self.params.biases['encoder_b1']))
 
-                layer_1_miss = self.sampling.nr(samples)
-                layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
+                layer_1_miss = self.sampling.nr(samples, self.layer_builder.weights_1_layer,
+                                                self.layer_builder.bias_1_layer)
+                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.size[0], self.params.num_hidden_1))
 
                 layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
         if self.params.method == 'imputation':
-            layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.X, self.params.weights['encoder_h1']),
-                       self.params.biases['encoder_b1']))
+            layer_1 = self.layer_builder.build_layer(self.X, self.params.layer_inputs_encoder[0],
+                                                     self.params.layer_outputs_encoder[0], 'relu')
 
-        layer_2 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_1, self.params.weights['encoder_h2']), self.params.biases['encoder_b2']))
-        layer_3 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_2, self.params.weights['encoder_h3']), self.params.biases['encoder_b3']))
-        return layer_3
+        layer = layer_1
+
+        for i in range(2):
+            layer = self.layer_builder.build_layer(layer, self.params.layer_inputs_encoder[i + 1],
+                                                   self.params.layer_outputs_encoder[i + 1], 'sigmoid')
+
+        return layer
 
     def decoder(self, x):
-        layer_1 = tf.nn.sigmoid(
-            tf.add(tf.matmul(x, self.params.weights['decoder_h1']), self.params.biases['decoder_b1']))
-        layer_2 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_1, self.params.weights['decoder_h2']), self.params.biases['decoder_b2']))
-        layer_3 = tf.nn.sigmoid(
-            tf.add(tf.matmul(layer_2, self.params.weights['decoder_h3']), self.params.biases['decoder_b3']))
+        layer = x
+        for i in range(3):
+            layer = self.layer_builder.build_layer(layer, self.params.layer_inputs_decoder[i],
+                                                   self.params.layer_outputs_decoder[i],
+                                                   'sigmoid')
 
         if self.params.method != 'last_layer':
-            return layer_3
+            return layer
 
         if self.params.method == 'last_layer':
-            input = layer_3[:self.size[0] * self.params.num_sample, :]
+            input = layer[:self.size[0] * self.params.num_sample, :]
             mean = self.sampling.mean_sample(input, self.params.num_input)
             return mean
 
@@ -228,10 +154,8 @@ class AutoencoderFC:
                           :self.size[0] * self.params.num_sample, :]
             y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
                           :self.size[0] * self.params.num_sample, :]
-            loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=1),
-                                       axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
-            # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2)) czy tutaj nie powinno być axis=1 zamiast axis=2 ???
-            loss = loss_miss
+            loss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=1),
+                                  axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
 
         optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
 
@@ -333,30 +257,30 @@ def run_model(dataset):
 
 
 def run_the_best():
-    dataset_processor = DatasetProcessor(path='', dataset='mnist', width_mask=13, nn=100)
+    dataset_processor = DatasetProcessor(dataset='mnist')
     X = dataset_processor.load_data()
     data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
     data_test = np.random.permutation(data_test)
     data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('original_data', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('original_data', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
 
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('image_with_patch', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('image_with_patch', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
     data_imputed_train = imp.fit_transform(data_train)
@@ -390,5 +314,5 @@ def run_the_best():
     f.close()
 
 
-# run_the_best()
-run_model('svhn')
+run_the_best()
+# run_model('svhn')

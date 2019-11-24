@@ -11,10 +11,11 @@ class Visualizator:
 
         pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-    def plot_loss(self, loss, epochs, title, file_name):
+    def plot_train_multiple_loss(self, losses, epochs, title, file_name):
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
-        plt.plot(epochs, loss)
+        for loss in losses:
+            plt.plot(epochs, loss)
         plt.title(title)
         plt.savefig(os.path.join(self.save_dir, file_name))
         plt.close()
@@ -36,6 +37,7 @@ class Visualizator:
             (str(i * self.nn + j), '-' + method + '.png'))),
                     bbox_inches='tight')
         plt.close()
+
 
 
 
