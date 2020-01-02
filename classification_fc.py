@@ -14,7 +14,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class ClassificationFCParams:
-    def __init__(self, method, dataset, num_sample=None):
+    def __init__(self, method, dataset, num_sample=None, learning_rate=0.001):
         initializer = tf.contrib.layers.variance_scaling_initializer()
         self.num_input = 784
         self.num_hidden_1 = 512
@@ -31,10 +31,11 @@ class ClassificationFCParams:
         self.dataset = dataset
         self.num_sample = num_sample
 
+        self.learning_rate = learning_rate
+
         self.layer_inputs = [self.num_input, self.num_hidden_1, self.num_hidden_2, self.num_hidden_3, self.num_hidden_4]
         self.layer_outputs = [self.num_hidden_1, self.num_hidden_2, self.num_hidden_3, self.num_hidden_4,
                               self.num_output]
-
 
         self.weights = []
         self.biases = []
@@ -75,7 +76,8 @@ class ClassificationFC:
 
     def set_variables(self):
         if self.params.method != 'imputation':
-            gmm = GaussianMixture(n_components=self.params.n_distribution, covariance_type='diag').fit(self.data_imputed_train)
+            gmm = GaussianMixture(n_components=self.params.n_distribution, covariance_type='diag').fit(
+                self.data_imputed_train)
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
@@ -112,17 +114,16 @@ class ClassificationFC:
 
         if self.params.method == 'imputation':
             layer_1 = tf.nn.relu(
-                    tf.add(tf.matmul(self.X, self.params.weights[0]),
-                           self.params.biases[0]))
+                tf.add(tf.matmul(self.X, self.params.weights[0]),
+                       self.params.biases[0]))
 
         layer = layer_1
 
-        for i in range(self.params.num_layers-1):
+        for i in range(self.params.num_layers - 1):
             layer = tf.nn.relu(
-                tf.add(tf.matmul(layer, self.params.weights[i+1]), self.params.biases[i+1]))
+                tf.add(tf.matmul(layer, self.params.weights[i + 1]), self.params.biases[i + 1]))
 
         layer = tf.add(tf.matmul(layer, self.params.weights[-1]), self.params.biases[-1])
-
 
         if self.params.method != 'last_layer':
             return layer
@@ -135,7 +136,6 @@ class ClassificationFC:
         return layer
 
     def main_loop(self, n_epochs):
-        learning_rate = 0.001
         batch_size = 64
 
         loss = None
@@ -165,17 +165,13 @@ class ClassificationFC:
                 logits=y_pred,
             ))
 
-            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
+            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels, 1),
                                               predictions=tf.argmax(y_pred, 1))
 
-        optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
+        optimizer = tf.train.RMSPropOptimizer(self.params.learning_rate).minimize(loss)
 
         init = tf.global_variables_initializer()
         init_loc = tf.local_variables_initializer()
-
-        v = Visualizator(
-            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
-                self.gamma_int), 'loss')
 
         train_loss = []
         with tf.Session() as sess:
@@ -193,14 +189,13 @@ class ClassificationFC:
                     else:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
-
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
-
-                print('Loss:', l)
+                print("Train loss", l)
 
                 train_loss.append(l)
 
+            test_loss = []
             for i in range(self.data_test.shape[0] // 2):
                 if self.params.method != 'imputation':
                     batch_x = self.data_test[i * 2: (i + 1) * 2, :]
@@ -209,11 +204,12 @@ class ClassificationFC:
 
                 labels = self.labels_test[i * 2: (i + 1) * 2, :]
 
-                accuracy, accuracy_op, test_loss = sess.run([acc, acc_op, loss],
-                                                            feed_dict={self.X: batch_x, self.labels: labels})
+                accuracy, accuracy_op, tl = sess.run([acc, acc_op, loss],
+                                                     feed_dict={self.X: batch_x, self.labels: labels})
 
-            print("Accuracy:", accuracy_op, "Train loss:", test_loss)
-        return accuracy_op
+            print("Accuracy:", accuracy_op, "Train loss:", tl)
+            test_loss.append(tl)
+        return accuracy_op, test_loss, train_loss
 
 
 def run_model():
@@ -232,27 +228,47 @@ def run_model():
     data_imputed_test = imp.transform(data_test).reshape(data_test.shape[0], 784)
 
     params = [
-        {'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
-        # {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 1.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0}]},
-        #                                     {'num_sample': 20, 'epoch': 250, 'gamma': 0.0},
-        #                                     {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]}
-        # {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.5}]}
+        {'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0},
+                                        {'num_sample': 1, 'epoch': 100, 'gamma': 0.0, 'learning_rate': 0.003},
+                                        {'num_sample': 1, 'epoch': 100, 'gamma': 0.0, 'learning_rate': 0.01}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
+                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
+                                            {'num_sample': 20, 'epoch': 100, 'gamma': 0.5},
+                                            {'num_sample': 100, 'epoch': 100, 'gamma': 1.0},
+                                            {'num_sample': 100, 'epoch': 100, 'gamma': 0.0}]},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
+                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5}]}
 
     ]
-    f = open('loss_results_classification_fc', "a")
+    f = open('loss_results_classification_fc_3', "a")
+    train_losses = []
+    test_losses = []
     for eleme in params:
         for param in eleme['params']:
-            p = ClassificationFCParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])
+            p = ClassificationFCParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'],
+                                       learning_rate=param.get('learning_rate', 0.001))
             a = ClassificationFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                                  data_imputed_test=data_imputed_test,
                                  gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
-            accuracy = a.main_loop(param['epoch'])
+            accuracy, test_loss, train_loss = a.main_loop(param['epoch'])
+            test_losses.append(test_loss)
+            train_losses.append(train_loss)
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(accuracy))
             f.write('\n')
+            f.write('Test loss:' + str(test_loss))
+            f.write('\n')
+            f.write('Train loss:' + str(train_loss))
+            f.write('\n')
+
     f.close()
+    # Visualizator.draw_losses(train_losses, 'Koszt treningowy', ['metoda analityczna, pierwsza warstwa', 'ostatnia warstwa', 'po koszcie', 'imputacja'])
+    # Visualizator.draw_losses(test_losses, 'Koszt testowy',  ['metoda analityczna, pierwsza warstwa', 'ostatnia warstwa', 'po koszcie', 'imputacja'])
 
 
 run_model()

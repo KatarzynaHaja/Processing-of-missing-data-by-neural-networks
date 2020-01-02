@@ -165,6 +165,7 @@ class AutoencoderFC:
             'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
 
+        train_loss = []
         with tf.Session() as sess:
             sess.run(init)
             for epoch in range(1, n_epochs + 1):
@@ -180,6 +181,7 @@ class AutoencoderFC:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
+                train_loss.append(l)
 
             test_loss = []
             if self.params.dataset == 'mnist':
@@ -210,7 +212,7 @@ class AutoencoderFC:
                         v.draw_svhn_image(i, j, g, self.params.method)
                     test_loss.append(l_test)
 
-        return np.mean(test_loss)
+        return np.mean(test_loss), test_loss, train_loss
 
 
 from sklearn.model_selection import ParameterGrid
@@ -247,7 +249,7 @@ def run_model(dataset):
             a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                               data_imputed_test=data_imputed_test,
                               gamma=params['gamma'])
-            loss = a.autoencoder_main_loop(params['epoch'])
+            loss, test_loss, train_loss = a.autoencoder_main_loop(params['epoch'])
             print(method + "," + str(params['num_sample']) + ',' + str(params['epoch']) + ',' + str(
                 params['gamma']) + ',' + str(loss))
             f.write(method + ", num_sample:" + str(params['num_sample']) + ', epoch:'
@@ -299,19 +301,29 @@ def run_the_best():
 
               ]
     f = open('loss_results_the_best', "a")
+    train_losses = []
+    test_losses = []
     for i in params:
         for params in i['params']:
             p = AutoencoderFCParams(method=i['method'], dataset='mnist', num_sample=params['num_sample'])
             a = AutoencoderFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                               data_imputed_test=data_imputed_test,
                               gamma=params['gamma'])
-            loss = a.autoencoder_main_loop(params['epoch'])
+            loss, test_loss, train_loss = a.autoencoder_main_loop(params['epoch'])
+            train_losses.append(train_loss)
+            test_losses.append(test_loss)
             print(i['method'] + "," + str(params['num_sample']) + ',' + str(params['epoch']) + ',' + str(
                 params['gamma']) + ',' + str(loss))
             f.write(i['method'] + ", num_sample:" + str(params['num_sample']) + ', epoch:'
                     + str(params['epoch']) + ',' + str(params['gamma']) + 'result:' + str(loss))
             f.write('\n')
+            f.write('Test loss:'+ ', '.join(test_loss))
+            f.write('Train loss:' + ', '.join(train_loss))
+            f.write('\n')
     f.close()
+
+    Visualizator.draw_losses(train_losses)
+    Visualizator.draw_losses(test_losses)
 
 
 run_the_best()

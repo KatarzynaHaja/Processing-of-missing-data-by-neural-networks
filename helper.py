@@ -1,5 +1,5 @@
 # from tensorflow.examples.tutorials.mnist import input_data
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 # X = input_data.read_data_sets("./data_mnist/", one_hot=True)
 # image = X.train.images[0]
 # plt.imshow(image.reshape(28, 28), origin="upper", cmap="gray")
@@ -40,19 +40,32 @@
 # plt.axis('off')
 # plt.savefig('mnist_example_with_patch',  bbox_inches='tight', pad_inches=0)
 
+#
+# from processing_images import DatasetProcessor
+# import matplotlib.pyplot as plt
+#
+# d = DatasetProcessor('svhn')
+# data_train, data_test = d.load_data()
+# data_train['X'] = d.reshape_data(data_train['X'])
+# data_test['X'] = d.reshape_data(data_test['X'])
+# data_train, data_test = d.mask_data(data_train, data_test)
+#
+# plt.imshow(data_train['X'][0].reshape(32, 32,3).astype('uint8'), origin="upper")
+# plt.axis('off')
+# plt.savefig('svhn_masked_example',  bbox_inches='tight', pad_inches=0)
 
-from processing_images import DatasetProcessor
-import matplotlib.pyplot as plt
+import numpy as np
+data = [0.0052325632, 0.008187881, 0.014886782]
+labels = ['metoda analiczna', 'ostatnia warstwa', 'imputacja']
+pos = np.arange(len(data))
 
-d = DatasetProcessor('svhn')
-data_train, data_test = d.load_data()
-data_train['X'] = d.reshape_data(data_train['X'])
-data_test['X'] = d.reshape_data(data_test['X'])
-data_train, data_test = d.mask_data(data_train, data_test)
-
-plt.imshow(data_train['X'][0].reshape(32, 32,3).astype('uint8'), origin="upper")
-plt.axis('off')
-plt.savefig('svhn_masked_example',  bbox_inches='tight', pad_inches=0)
+plt.bar(pos,data,color='lightsteelblue', width=0.3)
+plt.xticks(pos, labels)
+plt.xlabel('Metody', fontsize=12)
+plt.ylabel('Średni koszt', fontsize=12)
+plt.title('Porównianie średniego kosztu - autoenkoder liniowy', fontsize=13)
+plt.savefig("Porównianie średniego kosztu")
+plt.show()
 
 
 

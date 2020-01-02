@@ -62,12 +62,12 @@ class Sampling:
     def get_distibution_params(self, component, means, covs):
         where_isnan = tf.is_nan(self.x_miss)
         component_means = tf.gather(means, component)
-        data_miss = tf.where(where_isnan, component_means, self.x_miss)
+        miss_mean = tf.where(where_isnan, component_means, self.x_miss)
 
         component_covs = tf.gather(covs, component)
         miss_cov = tf.where(where_isnan, component_covs, self.x_miss)
 
-        return data_miss, miss_cov
+        return miss_mean, miss_cov
 
     def generate_samples(self, p, x_miss, means, covs, num_input, gamma):
         size = tf.shape(x_miss)

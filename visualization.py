@@ -38,6 +38,16 @@ class Visualizator:
                     bbox_inches='tight')
         plt.close()
 
+    @classmethod
+    def draw_losses(self, losses, title, legend):
+        cmap = plt.get_cmap(name='hsv')
+        for i in range(losses):
+            plt.title(title, font=14)
+            plt.plot([j for j in range(len(losses[i]))],losses[i],  color=cmap(i), label=legend[i])
+        plt.legend()
+        plt.savefig(title)
+
+
 
 
 
