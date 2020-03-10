@@ -2,7 +2,7 @@ import tensorflow as tf
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import Imputer
 from processing_images import DatasetProcessor
-from ae_sample import Sampling
+from sampling_fc import Sampling
 import numpy as np
 import sys
 import os
