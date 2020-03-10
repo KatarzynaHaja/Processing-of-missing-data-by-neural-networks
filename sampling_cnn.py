@@ -85,9 +85,7 @@ class Sampling:
 
     def nr(self, output):
         reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
-        layer_1_m = tf.add(tf.matmul(reshaped_output, self.params.weights['h1']),
-                           self.params.biases['b1'])
-        layer_1_m = tf.nn.relu(layer_1_m)
+        layer_1_m = tf.nn.conv2d(reshaped_output, filter=(3, 3))
 
         if self.method == 'first_layer':
             unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))

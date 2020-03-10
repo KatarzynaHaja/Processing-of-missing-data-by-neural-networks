@@ -13,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class ClassificationCNNParams:
-    def __init__(self, method, dataset, num_sample=None):
+    def __init__(self, method, dataset, num_sample=None, learning_rate=0.01):
         initializer = tf.contrib.layers.variance_scaling_initializer()
 
         #TODO: Change params to CNN's params.
@@ -26,6 +26,7 @@ class ClassificationCNNParams:
         self.method = method
         self.dataset = dataset
         self.num_sample = num_sample
+        self.learning_rate = learning_rate
 
         self.weights = {
             'h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
@@ -39,7 +40,7 @@ class ClassificationCNNParams:
         }
 
 
-class ClassificationFC:
+class ClassificationCNN:
     def __init__(self, params, data_train, data_test, data_imputed_train, data_imputed_test, gamma, labels_train,
                  labels_test):
         self.data_train = data_train
@@ -53,10 +54,7 @@ class ClassificationFC:
         self.gamma = gamma
         self.gamma_int = gamma
 
-        if self.params.method != 'theirs':
-            self.gamma = tf.Variable(initial_value=self.gamma)
-        else:
-            self.gamma = tf.Variable(initial_value=tf.random_normal(shape=(1,), mean=1., stddev=1.), dtype=tf.float32)
+        self.gamma = tf.Variable(initial_value=self.gamma)
 
         self.labels_train = labels_train
         self.labels_test = labels_test
@@ -88,99 +86,21 @@ class ClassificationFC:
 
     def model(self):
         if self.params.method != 'imputation':
-            if self.params.method == 'theirs':
-                gamma = tf.abs(self.gamma)
-                gamma_ = tf.cond(tf.less(gamma[0], 1.), lambda: gamma, lambda: tf.pow(gamma, 2))
-                covs = tf.abs(self.covs)
-                p = tf.abs(self.p)
-                p = tf.div(p, tf.reduce_sum(p, axis=0))
+            layer_1 = tf.nn.conv2d(self.x_known, filter=(3, 3))
+            samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
+                                                     self.params.num_input,
+                                                     self.gamma)
 
-                layer_1 = tf.nn.relu(tf.add(tf.matmul(self.x_known, self.params.weights['h1']),
-                                            self.params.biases['b1']))
+            layer_1_miss = self.sampling.nr(samples, self.params.weights[0],
+                                            self.params.biases[0])
+            layer_1_miss = tf.reshape(layer_1_miss, shape=(self.size[0], self.params.num_hidden_1))
 
-                where_isnan = tf.is_nan(self.x_miss)
-                where_isfinite = tf.is_finite(self.x_miss)
-
-                weights2 = tf.square(self.params.weights['h1'])
-
-                Q = []
-                layer_1_miss = tf.zeros([self.size[0], self.params.num_hidden_1])
-                for i in range(self.n_distribution):
-                    data_miss = tf.where(where_isnan,
-                                         tf.reshape(tf.tile(self.means[i, :], [self.size[0]]), [-1, self.size[1]]),
-                                         self.x_miss)
-                    miss_cov = tf.where(where_isnan,
-                                        tf.reshape(tf.tile(covs[i, :], [self.size[0]]), [-1, self.size[1]]),
-                                        tf.zeros([self.size[0], self.size[1]]))
-
-                    layer_1_m = tf.add(tf.matmul(data_miss, self.params.weights['h1']),
-                                       self.params.biases['b1'])
-
-                    layer_1_m = tf.div(layer_1_m, tf.sqrt(tf.matmul(miss_cov, weights2)))
-                    layer_1_m = tf.div(tf.exp(tf.div(-tf.pow(layer_1_m, 2), 2.)), np.sqrt(2 * np.pi)) + tf.multiply(
-                        tf.div(layer_1_m, 2.), 1 + tf.erf(
-                            tf.div(layer_1_m, np.sqrt(2))))
-
-                    layer_1_miss = tf.cond(tf.equal(tf.constant(i), tf.constant(0)),
-                                           lambda: tf.add(layer_1_miss, layer_1_m),
-                                           lambda: tf.concat((layer_1_miss, layer_1_m), axis=0))
-
-                    norm = tf.subtract(data_miss, self.means[i, :])
-                    norm = tf.square(norm)
-                    q = tf.where(where_isfinite,
-                                 tf.reshape(tf.tile(tf.add(gamma_, covs[i, :]), [self.size[0]]), [-1, self.size[1]]),
-                                 tf.ones_like(self.x_miss))
-                    norm = tf.div(norm, q)
-                    norm = tf.reduce_sum(norm, axis=1)
-
-                    q = tf.log(q)
-                    q = tf.reduce_sum(q, axis=1)
-
-                    q = tf.add(q, norm)
-
-                    norm = tf.cast(tf.reduce_sum(tf.cast(where_isfinite, tf.int32), axis=1), tf.float32)
-                    norm = tf.multiply(norm, tf.log(2 * np.pi))
-
-                    q = tf.add(q, norm)
-                    q = tf.multiply(q, -0.5)
-
-                    Q = tf.concat((Q, q), axis=0)
-
-                Q = tf.reshape(Q, shape=(self.n_distribution, -1))
-                Q = tf.add(Q, tf.log(p))
-                Q = tf.subtract(Q, tf.reduce_max(Q, axis=0))
-                Q = tf.where(Q < -20, tf.multiply(tf.ones_like(Q), -20), Q)
-                Q = tf.exp(Q)
-                Q = tf.div(Q, tf.reduce_sum(Q, axis=0))
-                Q = tf.reshape(Q, shape=(-1, 1))
-
-                layer_1_miss = tf.multiply(layer_1_miss, Q)
-                layer_1_miss = tf.reshape(layer_1_miss,
-                                          shape=(self.n_distribution, self.size[0], self.params.num_hidden_1))
-                layer_1_miss = tf.reduce_sum(layer_1_miss, axis=0)
-
-                layer_1 = tf.concat((layer_1, layer_1_miss), axis=0)
-            else:
-
-                samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
-                                                         self.params.num_input,
-                                                         self.gamma)
-                layer_1 = tf.nn.relu(
-                    tf.add(tf.matmul(self.x_known, self.params.weights['h1']),
-                           self.params.biases['b1']))
-
-                layer_1_miss = self.sampling.nr(samples)
-                layer_1_miss = tf.reshape(layer_1_miss, shape=(self.size[0], self.params.num_hidden_1))
-
-                layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
+            layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
 
         if self.params.method == 'imputation':
-            layer_1 = tf.nn.relu(
-                tf.add(tf.matmul(self.X, self.params.weights['h1']),
-                       self.params.biases['b1']))
+            layer_1 = tf.nn.conv2d(self.X, filter=(3, 3))
 
-        layer_2 = tf.nn.relu(
-            tf.add(tf.matmul(layer_1, self.params.weights['h2']), self.params.biases['b2']))
+        layer_2 = tf.nn.conv2d(layer_1, filter=(3, 3))
 
         layer_3 = tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3'])
 
@@ -195,7 +115,6 @@ class ClassificationFC:
         return layer_3
 
     def main_loop(self, n_epochs):
-        learning_rate = 0.01
         batch_size = 64
 
         loss = None
@@ -225,14 +144,13 @@ class ClassificationFC:
                 logits=y_pred,
             ))
 
-        optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss)
+            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels, 1),
+                                              predictions=tf.argmax(y_pred, 1))
+
+        optimizer = tf.train.RMSPropOptimizer(self.params.learning_rate).minimize(loss)
 
         init = tf.global_variables_initializer()
         init_loc = tf.local_variables_initializer()
-
-        v = Visualizator(
-            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
-                self.gamma_int), 'loss')
 
         train_loss = []
         with tf.Session() as sess:
@@ -251,14 +169,12 @@ class ClassificationFC:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
-                    _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x, self.labels: labels})
-
-                print('Loss:', l)
+                    _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
+                print("Train loss", l)
 
                 train_loss.append(l)
 
-            v.plot_loss(train_loss, [i for i in range(n_epochs)], 'Koszt treningowy', 'Training')
-
+            test_loss = []
             for i in range(self.data_test.shape[0] // 2):
                 if self.params.method != 'imputation':
                     batch_x = self.data_test[i * 2: (i + 1) * 2, :]
@@ -267,12 +183,12 @@ class ClassificationFC:
 
                 labels = self.labels_test[i * 2: (i + 1) * 2, :]
 
-                accuracy, accuracy_op, test_loss = sess.run([acc, acc_op, loss],
-                                                    feed_dict={self.X: batch_x, self.labels: labels})
+                accuracy, accuracy_op, tl = sess.run([acc, acc_op, loss],
+                                                     feed_dict={self.X: batch_x, self.labels: labels})
 
-            print("Accuracy:", accuracy_op, "Train loss:", test_loss)
-        return accuracy_op
-
+            print("Accuracy:", accuracy_op, "Train loss:", tl)
+            test_loss.append(tl)
+        return accuracy_op, test_loss, train_loss
 
 
 def run_model():
@@ -300,8 +216,8 @@ def run_model():
     f = open('loss_results_classification', "a")
     for eleme in params:
         for param in eleme['params']:
-            p = ClassificationFCParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])
-            a = ClassificationFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
+            p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])
+            a = ClassificationCNN(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                                  data_imputed_test=data_imputed_test,
                                  gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
             accuracy = a.main_loop(param['epoch'])
