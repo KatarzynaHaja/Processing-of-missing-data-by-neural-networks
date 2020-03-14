@@ -13,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class ClassificationCNNParams:
-    def __init__(self, method, dataset, num_sample=None, learning_rate=0.01):
+    def __init__(self, method, dataset, num_sample=None, learning_rate=0.001):
         initializer = tf.contrib.layers.variance_scaling_initializer()
 
         self.width = 28
@@ -53,7 +53,7 @@ class ClassificationCNNParams:
             self.filters_biases.append(tf.Variable(tf.random_normal([self.filters[i][-1]])))
 
         # initialize weights and biases for fully connected
-        for i in range(len(self.filters)):
+        for i in range(len(self.fully_connected)):
             self.fully_connected_weights.append(tf.Variable(initializer(self.fully_connected[i])))
             self.fully_connected_biases.append(tf.Variable(tf.random_normal([self.fully_connected[i][-1]])))
 
@@ -77,13 +77,15 @@ class ClassificationCNN:
         self.labels_train = labels_train
         self.labels_test = labels_test
 
-        self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
-        self.size = tf.shape(self.x_miss)
+        # self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
+        # self.size = tf.shape(self.x_miss)
 
-        if self.params.method != 'imputation':
-            self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
-                                     n_distribution=self.n_distribution,
-                                     method=self.params.method)
+        self.size = tf.shape(self.X)
+
+        # if self.params.method != 'imputation':
+        #     self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
+        #                              n_distribution=self.n_distribution,
+        #                              method=self.params.method)
 
     def set_variables(self):
         if self.params.method != 'imputation':
@@ -116,18 +118,18 @@ class ClassificationCNN:
         max_pooling_2 = tf.nn.max_pool2d(input=conv_2, ksize=self.params.max_pooling_2_ksize,
                                          strides=self.params.max_pooling_2_stride, padding='SAME')
 
-        reshaped_max_pooling_2 =tf.reshape(tensor=max_pooling_2, shape=(self.size[0], 7*7*64))
+        reshaped_max_pooling_2 = tf.reshape(tensor=max_pooling_2, shape=(self.size[0], 7 * 7 * 64))
 
         layer_fc_1 = tf.nn.relu(
-            tf.add(tf.matmul(tf.transpose(reshaped_max_pooling_2), self.params.fully_connected_weights[0]),
+            tf.add(tf.matmul(reshaped_max_pooling_2, self.params.fully_connected_weights[0]),
                    self.params.fully_connected_biases[0]))
 
-        #output:(?,128)
+        # output:(?,128)
 
-        layer_fc_2 = tf.nn.relu(tf.add(tf.matmul(layer_fc_1, self.params.fully_connected_weights[1]),
-                                       self.params.fully_connected_biases[1]))
+        layer_fc_2 = tf.add(tf.matmul(layer_fc_1, self.params.fully_connected_weights[1]),
+                                       self.params.fully_connected_biases[1])
 
-        #output : (?, 10)
+        # output : (?, 10)
 
         return layer_fc_2
 
@@ -169,7 +171,8 @@ class ClassificationCNN:
                     if self.params.method != 'imputation':
                         batch_x = self.data_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
                     else:
-                        batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
+                        batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :, :,
+                                  :]
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
