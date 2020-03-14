@@ -15,12 +15,24 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 class ClassificationCNNParams:
     def __init__(self, method, dataset, num_sample=None, learning_rate=0.01):
         initializer = tf.contrib.layers.variance_scaling_initializer()
+        batch_size = 64
 
-        #TODO: Change params to CNN's params.
-        self.num_input = 784
-        self.num_hidden_1 = (32,32,3)  # 1st layer num features
-        self.num_hidden_2 = 128  # 2nd layer num features (the latent dim)
+        self.conv_layer_1_input = [batch_size, 28, 28, 1]
+        self.conv_layer_1_filters = [3, 3, 1, 32]
+        self.max_pooling_1_input = [batch_size, 28, 28, 32]
+        self.max_pooling_1_ksize =2
+        self.max_pooling_1_stride = 2
+        self.max_pooling_2_ksize = 2
+        self.max_pooling_2_stride = 2
+        self.conv_layer_2_input = [batch_size, 14, 14, 32]
+        self.conv_layer_2_filters = [3, 3, 32, 64]
+        self.max_pooling_2_input = [batch_size, 14, 14, 32]
+        self.flatten_1 = [batch_size * 7 * 7, 128]
+        self.flatten_2 = [128, 10]
+
         self.num_output = 10
+
+        self.num_layers = 6
 
         self.nn = 100
         self.method = method
@@ -28,16 +40,18 @@ class ClassificationCNNParams:
         self.num_sample = num_sample
         self.learning_rate = learning_rate
 
-        self.weights = {
-            'h1': tf.Variable(initializer([self.num_input, self.num_hidden_1])),
-            'h2': tf.Variable(initializer([self.num_hidden_1, self.num_hidden_2])),
-            'h3': tf.Variable(initializer([self.num_hidden_2, self.num_output])),
-        }
-        self.biases = {
-            'b1': tf.Variable(tf.random_normal([self.num_hidden_1])),
-            'b2': tf.Variable(tf.random_normal([self.num_hidden_2])),
-            'b3': tf.Variable(tf.random_normal([self.num_output])),
-        }
+        self.layers = [self.conv_layer_1_input, self.max_pooling_1_input, self.conv_layer_2_input, self.max_pooling_2_input, self.flatten_1, self.flatten_2 ]
+        self.filters = [self.conv_layer_1_filters, self.conv_layer_2_filters]
+
+
+        self.layers_weights = []
+        self.layers_biases = []
+        self.filters_weights = []
+        self.filters_biases = []
+
+        for i in range(self.num_layers):
+            self.layers_weights.append(tf.Variable(initializer(self.layers[i])))
+            self.layers_biases.append(tf.Variable(tf.random_normal(self.)))
 
 
 class ClassificationCNN:
@@ -85,35 +99,7 @@ class ClassificationCNN:
         return x_miss, x_known
 
     def model(self):
-        if self.params.method != 'imputation':
-            layer_1 = tf.nn.conv2d(self.x_known, filter=(3, 3))
-            samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
-                                                     self.params.num_input,
-                                                     self.gamma)
-
-            layer_1_miss = self.sampling.nr(samples, self.params.weights[0],
-                                            self.params.biases[0])
-            layer_1_miss = tf.reshape(layer_1_miss, shape=(self.size[0], self.params.num_hidden_1))
-
-            layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
-
-        if self.params.method == 'imputation':
-            layer_1 = tf.nn.conv2d(self.X, filter=(3, 3))
-
-        layer_2 = tf.nn.conv2d(layer_1, filter=(3, 3))
-
-        layer_3 = tf.add(tf.matmul(layer_2, self.params.weights['h3']), self.params.biases['b3'])
-
-        if self.params.method != 'last_layer':
-            return layer_3
-
-        if self.params.method == 'last_layer':
-            input = layer_3[:self.size[0] * self.params.num_sample, :]
-            mean = self.sampling.mean_sample(input, self.params.num_output)
-            return mean
-
-        return layer_3
-
+        pass
     def main_loop(self, n_epochs):
         batch_size = 64
 
@@ -123,29 +109,15 @@ class ClassificationCNN:
 
         y_pred = self.model()  # prediction
 
-        if self.params.method != 'different_cost':
-            loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-                labels=self.labels,
-                logits=y_pred
-            )
+        loss = tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels=self.labels,
+            logits=y_pred
+        )
 
-            loss = tf.reduce_mean(loss)
+        loss = tf.reduce_mean(loss)
 
-            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
-                                              predictions=tf.argmax(y_pred, 1))
-
-        if self.params.method == 'different_cost':
-            labels = tf.expand_dims(self.labels, 0)
-            labels = tf.tile(labels, [self.params.num_sample, 1, 1])
-            labels = tf.reshape(labels, shape=(self.params.num_sample * self.size[0], 10))
-
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
-                labels=labels,
-                logits=y_pred,
-            ))
-
-            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels, 1),
-                                              predictions=tf.argmax(y_pred, 1))
+        acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
+                                          predictions=tf.argmax(y_pred, 1))
 
         optimizer = tf.train.RMSPropOptimizer(self.params.learning_rate).minimize(loss)
 
@@ -217,14 +189,13 @@ def run_model():
         for param in eleme['params']:
             p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])
             a = ClassificationCNN(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
-                                 data_imputed_test=data_imputed_test,
-                                 gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
+                                  data_imputed_test=data_imputed_test,
+                                  gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
             accuracy = a.main_loop(param['epoch'])
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(accuracy))
             f.write('\n')
     f.close()
-
 
 
 run_model()

@@ -40,7 +40,6 @@ class ClassificationFCParams:
         self.weights = []
         self.biases = []
         for i in range(self.num_layers + 1):
-            tf.Variable(initializer([self.num_input, self.num_hidden_1]))
             self.weights.append(tf.Variable(initializer([self.layer_inputs[i], self.layer_outputs[i]])))
             self.biases.append(tf.Variable(tf.random_normal([self.layer_outputs[i]])))
 
