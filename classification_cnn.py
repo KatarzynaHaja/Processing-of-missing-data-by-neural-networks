@@ -15,19 +15,18 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 class ClassificationCNNParams:
     def __init__(self, method, dataset, num_sample=None, learning_rate=0.01):
         initializer = tf.contrib.layers.variance_scaling_initializer()
-        batch_size = 64
 
-        self.conv_layer_1_input = [batch_size, 28, 28, 1]
+        self.width = 28
+        self.length = 28
+        self.num_channels = 1
+
         self.conv_layer_1_filters = [3, 3, 1, 32]
-        self.max_pooling_1_input = [batch_size, 28, 28, 32]
-        self.max_pooling_1_ksize =2
+        self.max_pooling_1_ksize = 2
         self.max_pooling_1_stride = 2
         self.max_pooling_2_ksize = 2
         self.max_pooling_2_stride = 2
-        self.conv_layer_2_input = [batch_size, 14, 14, 32]
         self.conv_layer_2_filters = [3, 3, 32, 64]
-        self.max_pooling_2_input = [batch_size, 14, 14, 32]
-        self.flatten_1 = [batch_size * 7 * 7, 128]
+        self.flatten_1 = [64 * 7 * 7, 128]
         self.flatten_2 = [128, 10]
 
         self.num_output = 10
@@ -40,18 +39,23 @@ class ClassificationCNNParams:
         self.num_sample = num_sample
         self.learning_rate = learning_rate
 
-        self.layers = [self.conv_layer_1_input, self.max_pooling_1_input, self.conv_layer_2_input, self.max_pooling_2_input, self.flatten_1, self.flatten_2 ]
         self.filters = [self.conv_layer_1_filters, self.conv_layer_2_filters]
+        self.fully_connected = [self.flatten_1, self.flatten_2]
 
-
-        self.layers_weights = []
-        self.layers_biases = []
         self.filters_weights = []
         self.filters_biases = []
+        self.fully_connected_weights = []
+        self.fully_connected_biases = []
 
-        for i in range(self.num_layers):
-            self.layers_weights.append(tf.Variable(initializer(self.layers[i])))
-            self.layers_biases.append(tf.Variable(tf.random_normal(self.)))
+        # initilize weights and biases for filters
+        for i in range(len(self.filters)):
+            self.filters_weights.append(tf.Variable(initializer(self.filters[i])))
+            self.filters_biases.append(tf.Variable(tf.random_normal([self.filters[i][-1]])))
+
+        # initialize weights and biases for fully connected
+        for i in range(len(self.filters)):
+            self.fully_connected_weights.append(tf.Variable(initializer(self.fully_connected[i])))
+            self.fully_connected_biases.append(tf.Variable(tf.random_normal([self.fully_connected[i][-1]])))
 
 
 class ClassificationCNN:
@@ -63,7 +67,7 @@ class ClassificationCNN:
         self.data_imputed_test = data_imputed_test
         self.params = params
         self.n_distribution = 5
-        self.X = tf.placeholder("float", [None, self.params.num_input])
+        self.X = tf.placeholder("float", [None, self.params.width, self.params.length, self.params.num_channels])
         self.labels = tf.placeholder("float", [None, 10])
         self.gamma = gamma
         self.gamma_int = gamma
@@ -83,7 +87,8 @@ class ClassificationCNN:
 
     def set_variables(self):
         if self.params.method != 'imputation':
-            gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(self.data_imputed_train)
+            gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(
+                self.data_imputed_train.reshape(self.data_imputed_train.shape[0], 784))
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
@@ -99,7 +104,33 @@ class ClassificationCNN:
         return x_miss, x_known
 
     def model(self):
-        pass
+        conv_1 = tf.nn.relu(
+            tf.add(tf.nn.conv2d(input=self.X, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
+                   self.params.filters_biases[0]))
+        max_pooling_1 = tf.nn.max_pool2d(input=conv_1, ksize=self.params.max_pooling_1_ksize,
+                                         strides=self.params.max_pooling_1_stride, padding='SAME')
+        conv_2 = tf.nn.relu(
+            tf.add(tf.nn.conv2d(input=max_pooling_1, filters=self.params.filters_weights[1], strides=1, padding='SAME'),
+                   self.params.filters_biases[1]))
+
+        max_pooling_2 = tf.nn.max_pool2d(input=conv_2, ksize=self.params.max_pooling_2_ksize,
+                                         strides=self.params.max_pooling_2_stride, padding='SAME')
+
+        reshaped_max_pooling_2 =tf.reshape(tensor=max_pooling_2, shape=(self.size[0], 7*7*64))
+
+        layer_fc_1 = tf.nn.relu(
+            tf.add(tf.matmul(tf.transpose(reshaped_max_pooling_2), self.params.fully_connected_weights[0]),
+                   self.params.fully_connected_biases[0]))
+
+        #output:(?,128)
+
+        layer_fc_2 = tf.nn.relu(tf.add(tf.matmul(layer_fc_1, self.params.fully_connected_weights[1]),
+                                       self.params.fully_connected_biases[1]))
+
+        #output : (?, 10)
+
+        return layer_fc_2
+
     def main_loop(self, n_epochs):
         batch_size = 64
 
@@ -175,15 +206,14 @@ def run_model():
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
-    data_imputed_train = imp.fit_transform(data_train).reshape(data_train.shape[0], 784)
-    data_imputed_test = imp.transform(data_test).reshape(data_test.shape[0], 784)
 
-    params = [{'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 0.0},
-                                                  {'num_sample': 20, 'epoch': 250, 'gamma': 1.0},
-                                                  {'num_sample': 100, 'epoch': 150, 'gamma': 1.0}]},
-              {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
+    data_imputed_train = dataset_processor.reshape_data_to_convolution(imp.fit_transform(data_train))
+    data_imputed_test = dataset_processor.reshape_data_to_convolution(imp.transform(data_test))
 
-              ]
+    data_test = dataset_processor.reshape_data_to_convolution(data_test)
+    data_train = dataset_processor.reshape_data_to_convolution(data_train)
+
+    params = [{'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}]
     f = open('loss_results_classification_conv', "a")
     for eleme in params:
         for param in eleme['params']:

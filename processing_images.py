@@ -37,8 +37,11 @@ class DatasetProcessor:
 
         return data_train, data_test, labels_train, labels_test
 
-    def reshape_data(self, data):
-        return data.reshape(data.shape[0], 32*32 *3)
+    def reshape_data_to_convolution(self, data):
+        if self.dataset == 'mnist':
+            return data.reshape(data.shape[0], 28, 28, 1)
+        else:
+            return data.reshape(data.shape[0], 32, 32, 3)
 
     def random_mask_mnist(self):
         margin_left = self.margin
