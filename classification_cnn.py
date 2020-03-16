@@ -67,7 +67,7 @@ class ClassificationCNN:
         self.data_imputed_test = data_imputed_test
         self.params = params
         self.n_distribution = 5
-        self.X = tf.placeholder("float", [None, self.params.width, self.params.length, self.params.num_channels])
+        self.X = tf.placeholder("float", [None, self.params.width * self.params.length])
         self.labels = tf.placeholder("float", [None, 10])
         self.gamma = gamma
         self.gamma_int = gamma
@@ -77,15 +77,18 @@ class ClassificationCNN:
         self.labels_train = labels_train
         self.labels_test = labels_test
 
-        # self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
-        # self.size = tf.shape(self.x_miss)
-
         self.size = tf.shape(self.X)
 
-        # if self.params.method != 'imputation':
-        #     self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
-        #                              n_distribution=self.n_distribution,
-        #                              method=self.params.method)
+        if self.params.method != 'imputation':
+            self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
+            self.size = tf.shape(self.x_miss)
+            self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
+                                     n_distribution=self.n_distribution,
+                                     method=self.params.method)
+
+            self.x_miss
+        if self.params.method == 'imputation':
+            tf.reshape(self.X, shape=(self.size[0], self.params.width, self.params.length, self.params.num_channels))
 
     def set_variables(self):
         if self.params.method != 'imputation':
