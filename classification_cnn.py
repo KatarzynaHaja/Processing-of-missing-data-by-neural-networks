@@ -2,7 +2,7 @@ import tensorflow as tf
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import Imputer
 from processing_images import DatasetProcessor
-from sampling_fc import Sampling
+from sampling_cnn import Sampling
 import numpy as np
 import sys
 import os
@@ -85,9 +85,17 @@ class ClassificationCNN:
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
+            self.reshaped_x_known = tf.cond(tf.equal(tf.size(self.x_known), 0),
+                                            lambda: self.x_known,
+                                            lambda: tf.reshape(self.x_known,
+                                                               shape=(
+                                                               self.size[0], self.params.width, self.params.length,
+                                                               self.params.num_channels)))
 
         if self.params.method == 'imputation':
-            tf.reshape(self.X, shape=(self.size[0], self.params.width, self.params.length, self.params.num_channels))
+            self.reshaped_X = tf.reshape(self.X,
+                                         shape=(self.size[0], self.params.width, self.params.length,
+                                                self.params.num_channels))
 
     def set_variables(self):
         if self.params.method != 'imputation':
@@ -110,27 +118,25 @@ class ClassificationCNN:
     def model(self):
         conv_1 = None
 
-
         if self.params.method != 'imputation':
-            tf.reshape(self.x_known,
-                       shape=(self.size[0], self.params.width, self.params.length, self.params.num_channels))
-            conv_1_known = tf.nn.relu(
-                tf.add(
-                    tf.nn.conv2d(input=self.x_known, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
-                    self.params.filters_biases[0]))
-
             samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
-                                                     self.params.num_input,
+                                                     self.params.width * self.params.length,
                                                      self.gamma)
 
-            conv_1_miss = self.sampling.nr(samples, self.params.weights[0],
-                                           self.params.biases[0])
-
-            conv_1 = tf.concat((conv_1_known, conv_1_miss), axis=0)
+            conv_1_miss = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
+            conv_1 = tf.cond(tf.equal(tf.size(self.x_known), 0),
+                             lambda: conv_1_miss,
+                             lambda: tf.concat((tf.nn.relu(
+                                 tf.add(
+                                     tf.nn.conv2d(input=self.reshaped_x_known, filters=self.params.filters_weights[0],
+                                                  strides=1,
+                                                  padding='SAME'), self.params.filters_biases[0])), conv_1_miss),
+                                 axis=0))
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
-                tf.add(tf.nn.conv2d(input=self.X, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
+                tf.add(tf.nn.conv2d(input=self.reshaped_X, filters=self.params.filters_weights[0], strides=1,
+                                    padding='SAME'),
                        self.params.filters_biases[0]))
 
         max_pooling_1 = tf.nn.max_pool2d(input=conv_1, ksize=self.params.max_pooling_1_ksize,
@@ -142,8 +148,12 @@ class ClassificationCNN:
         max_pooling_2 = tf.nn.max_pool2d(input=conv_2, ksize=self.params.max_pooling_2_ksize,
                                          strides=self.params.max_pooling_2_stride, padding='SAME')
 
-        reshaped_max_pooling_2 = tf.reshape(tensor=max_pooling_2, shape=(self.size[0], 7 * 7 * 64))
+        if self.params.method != 'first_layer':
+            reshaped_max_pooling_2 = tf.reshape(tensor=max_pooling_2, shape=(self.size[0] * self.params.num_sample, 7 * 7 * 64))
 
+        else:
+            reshaped_max_pooling_2 = tf.reshape(tensor=max_pooling_2,
+                                                shape=(self.size[0], 7 * 7 * 64))
         layer_fc_1 = tf.nn.relu(
             tf.add(tf.matmul(reshaped_max_pooling_2, self.params.fully_connected_weights[0]),
                    self.params.fully_connected_biases[0]))
@@ -154,14 +164,9 @@ class ClassificationCNN:
                             self.params.fully_connected_biases[1])
 
         # output : (?, 10)
-        if self.params.method != 'last_layer':
-            return layer_fc_2
-
         if self.params.method == 'last_layer':
             input = layer_fc_2[:self.size[0] * self.params.num_sample, :]
-            layer_fc_2 = self.sampling.mean_sample(input, None, type='cnn')
-            return layer_fc_2
-
+            layer_fc_2 = self.sampling.mean_sample(input, [self.params.num_output])
         return layer_fc_2
 
     def main_loop(self, n_epochs):
@@ -173,15 +178,29 @@ class ClassificationCNN:
 
         y_pred = self.model()  # prediction
 
-        loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=self.labels,
-            logits=y_pred
-        )
+        if self.params.method != 'different_cost':
+            loss = tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=self.labels,
+                logits=y_pred
+            )
 
-        loss = tf.reduce_mean(loss)
+            loss = tf.reduce_mean(loss)
 
-        acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
-                                          predictions=tf.argmax(y_pred, 1))
+            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(self.labels, 1),
+                                              predictions=tf.argmax(y_pred, 1))
+
+        if self.params.method == 'different_cost':
+            labels = tf.expand_dims(self.labels, 0)
+            labels = tf.tile(labels, [self.params.num_sample, 1, 1])
+            labels = tf.reshape(labels, shape=(self.params.num_sample * self.size[0], 10))
+
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=labels,
+                logits=y_pred,
+            ))
+
+            acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels, 1),
+                                              predictions=tf.argmax(y_pred, 1))
 
         optimizer = tf.train.RMSPropOptimizer(self.params.learning_rate).minimize(loss)
 
@@ -202,8 +221,7 @@ class ClassificationCNN:
                     if self.params.method != 'imputation':
                         batch_x = self.data_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
                     else:
-                        batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :, :,
-                                  :]
+                        batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
@@ -260,16 +278,26 @@ def run_model():
 
     ]
     f = open('loss_results_classification_conv', "a")
+    train_losses = []
+    test_losses = []
     for eleme in params:
         for param in eleme['params']:
-            p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])
+            p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'],
+                                        learning_rate=param.get('learning_rate', 0.001))
             a = ClassificationCNN(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                                   data_imputed_test=data_imputed_test,
                                   gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
-            accuracy = a.main_loop(param['epoch'])
+            accuracy, test_loss, train_loss = a.main_loop(param['epoch'])
+            test_losses.append(test_loss)
+            train_losses.append(train_loss)
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(accuracy))
             f.write('\n')
+            f.write('Test loss:' + str(test_loss))
+            f.write('\n')
+            f.write('Train loss:' + str(train_loss))
+            f.write('\n')
+
     f.close()
 
 

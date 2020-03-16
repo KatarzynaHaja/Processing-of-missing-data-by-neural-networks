@@ -83,33 +83,17 @@ class Sampling:
                               lambda: tf.concat((samples, sample), axis=0))
         return samples
 
-    def nr(self, output, weights, bias, type='fc'):
-        if type == 'fc':
-            reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
-            layer_1_m = tf.add(tf.matmul(reshaped_output, weights), bias)
-            layer_1_m = tf.nn.relu(layer_1_m)
-
-        if type == 'cnn':
-            reshaped_output = tf.reshape(output, shape=(
-                self.size[0] * self.num_sample, self.params.width, self.params.length, self.params.num_channels))
-            layer_1_m = tf.nn.relu(
-                tf.add(
-                    tf.nn.conv2d(input=reshaped_output, filters=self.params.filters_weights[0], strides=1,
-                                 padding='SAME'),
-                    self.params.filters_biases[0]))
+    def nr(self, output, weights, bias):
+        reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
+        layer_1_m = tf.add(tf.matmul(reshaped_output, weights), bias)
+        layer_1_m = tf.nn.relu(layer_1_m)
 
         if self.method == 'first_layer':
             return self.mean_sample(layer_1_m, self.params.num_hidden_1)
         if self.method != 'first_layer':
             return layer_1_m
 
-    def mean_sample(self, input, output_dim, type='fc'):
-        mean = None
-        if type == 'fc':
-            unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], output_dim))
-            mean = tf.reduce_mean(unreshaped, axis=0)
-        if type == 'cnn':
-            unreshaped = tf.reshape(input, shape=(
-                self.num_sample, self.size[0], self.params.width, self.params.length, self.params.num_channels))
-            mean = tf.reduce_mean(unreshaped, axis=0)
+    def mean_sample(self, input, output_dim):
+        unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], output_dim))
+        mean = tf.reduce_mean(unreshaped, axis=0)
         return mean

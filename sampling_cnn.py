@@ -7,7 +7,7 @@ tfd = tfp.distributions
 
 class Sampling:
     def __init__(self, num_sample, params, x_miss, n_distribution, method):
-        self.num_sample = num_sample  # 10
+        self.num_sample = num_sample
         self.params = params
         self.x_miss = x_miss
         self.size = tf.shape(x_miss)
@@ -62,12 +62,12 @@ class Sampling:
     def get_distibution_params(self, component, means, covs):
         where_isnan = tf.is_nan(self.x_miss)
         component_means = tf.gather(means, component)
-        data_miss = tf.where(where_isnan, component_means, self.x_miss)
+        miss_mean = tf.where(where_isnan, component_means, self.x_miss)
 
         component_covs = tf.gather(covs, component)
         miss_cov = tf.where(where_isnan, component_covs, self.x_miss)
 
-        return data_miss, miss_cov
+        return miss_mean, miss_cov
 
     def generate_samples(self, p, x_miss, means, covs, num_input, gamma):
         size = tf.shape(x_miss)
@@ -83,18 +83,23 @@ class Sampling:
                               lambda: tf.concat((samples, sample), axis=0))
         return samples
 
-    def nr(self, output):
-        reshaped_output = tf.reshape(output, shape=(self.size[0] * self.num_sample, self.params.num_input))
-        layer_1_m = tf.nn.conv2d(reshaped_output, filter=(3, 3))
+    def nr(self, output, output_dim):
+        reshaped_output = tf.reshape(output, shape=(
+            self.size[0] * self.num_sample, self.params.width, self.params.length, self.params.num_channels))
+        layer_1_m = tf.nn.relu(
+            tf.add(
+                tf.nn.conv2d(input=reshaped_output, filters=self.params.filters_weights[0], strides=1,
+                             padding='SAME'),
+                self.params.filters_biases[0]))
 
         if self.method == 'first_layer':
-            unreshaped = tf.reshape(layer_1_m, shape=(self.num_sample, self.size[0], self.params.num_hidden_1))
-            mean = tf.reduce_mean(unreshaped, 0)
-            return mean
+            return self.mean_sample(layer_1_m, [self.params.width, self.params.length, output_dim])
         if self.method != 'first_layer':
             return layer_1_m
 
-    def mean_sample(self, input, output_dim):
-        unreshaped = tf.reshape(input, shape=(self.num_sample, self.size[0], output_dim))
+    def mean_sample(self, input, dims):
+        shape = [self.num_sample, self.size[0]]
+        shape.extend(dims)
+        unreshaped = tf.reshape(input, shape=shape)
         mean = tf.reduce_mean(unreshaped, axis=0)
         return mean
