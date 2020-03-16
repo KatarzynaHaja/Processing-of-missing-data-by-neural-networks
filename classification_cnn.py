@@ -86,7 +86,6 @@ class ClassificationCNN:
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
 
-            self.x_miss
         if self.params.method == 'imputation':
             tf.reshape(self.X, shape=(self.size[0], self.params.width, self.params.length, self.params.num_channels))
 
@@ -109,9 +108,31 @@ class ClassificationCNN:
         return x_miss, x_known
 
     def model(self):
-        conv_1 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=self.X, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
-                   self.params.filters_biases[0]))
+        conv_1 = None
+
+
+        if self.params.method != 'imputation':
+            tf.reshape(self.x_known,
+                       shape=(self.size[0], self.params.width, self.params.length, self.params.num_channels))
+            conv_1_known = tf.nn.relu(
+                tf.add(
+                    tf.nn.conv2d(input=self.x_known, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
+                    self.params.filters_biases[0]))
+
+            samples = self.sampling.generate_samples(self.p, self.x_miss, self.means, self.covs,
+                                                     self.params.num_input,
+                                                     self.gamma)
+
+            conv_1_miss = self.sampling.nr(samples, self.params.weights[0],
+                                           self.params.biases[0])
+
+            conv_1 = tf.concat((conv_1_known, conv_1_miss), axis=0)
+
+        if self.params.method == 'imputation':
+            conv_1 = tf.nn.relu(
+                tf.add(tf.nn.conv2d(input=self.X, filters=self.params.filters_weights[0], strides=1, padding='SAME'),
+                       self.params.filters_biases[0]))
+
         max_pooling_1 = tf.nn.max_pool2d(input=conv_1, ksize=self.params.max_pooling_1_ksize,
                                          strides=self.params.max_pooling_1_stride, padding='SAME')
         conv_2 = tf.nn.relu(
@@ -130,9 +151,16 @@ class ClassificationCNN:
         # output:(?,128)
 
         layer_fc_2 = tf.add(tf.matmul(layer_fc_1, self.params.fully_connected_weights[1]),
-                                       self.params.fully_connected_biases[1])
+                            self.params.fully_connected_biases[1])
 
         # output : (?, 10)
+        if self.params.method != 'last_layer':
+            return layer_fc_2
+
+        if self.params.method == 'last_layer':
+            input = layer_fc_2[:self.size[0] * self.params.num_sample, :]
+            layer_fc_2 = self.sampling.mean_sample(input, None, type='cnn')
+            return layer_fc_2
 
         return layer_fc_2
 
@@ -213,13 +241,24 @@ def run_model():
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
 
-    data_imputed_train = dataset_processor.reshape_data_to_convolution(imp.fit_transform(data_train))
-    data_imputed_test = dataset_processor.reshape_data_to_convolution(imp.transform(data_test))
+    data_imputed_train = imp.fit_transform(data_train)
+    data_imputed_test = imp.transform(data_test)
 
-    data_test = dataset_processor.reshape_data_to_convolution(data_test)
-    data_train = dataset_processor.reshape_data_to_convolution(data_train)
+    params = [
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
+                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
+                                            {'num_sample': 20, 'epoch': 100, 'gamma': 0.5},
+                                            {'num_sample': 100, 'epoch': 100, 'gamma': 1.0},
+                                            {'num_sample': 100, 'epoch': 100, 'gamma': 0.0}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
+                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
+                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5}]}
 
-    params = [{'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}]
+    ]
     f = open('loss_results_classification_conv', "a")
     for eleme in params:
         for param in eleme['params']:
