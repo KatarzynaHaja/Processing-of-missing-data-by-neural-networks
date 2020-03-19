@@ -81,7 +81,6 @@ class ClassificationCNN:
 
         if self.params.method != 'imputation':
             self.x_miss, self.x_known = self.divide_data_into_known_and_missing(self.X)
-            self.size = tf.shape(self.x_miss)
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
@@ -100,7 +99,7 @@ class ClassificationCNN:
     def set_variables(self):
         if self.params.method != 'imputation':
             gmm = GaussianMixture(n_components=self.n_distribution, covariance_type='diag').fit(
-                self.data_imputed_train.reshape(self.data_imputed_train.shape[0], 784))
+                self.data_imputed_train)
             self.p = tf.Variable(initial_value=gmm.weights_.reshape((-1, 1)), dtype=tf.float32)
             self.means = tf.Variable(initial_value=gmm.means_, dtype=tf.float32)
             self.covs = tf.abs(tf.Variable(initial_value=gmm.covariances_, dtype=tf.float32))
@@ -126,12 +125,13 @@ class ClassificationCNN:
             conv_1_miss = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
             conv_1 = tf.cond(tf.equal(tf.size(self.x_known), 0),
                              lambda: conv_1_miss,
-                             lambda: tf.concat((tf.nn.relu(
+                             lambda: tf.concat((conv_1_miss, tf.nn.relu(
                                  tf.add(
                                      tf.nn.conv2d(input=self.reshaped_x_known, filters=self.params.filters_weights[0],
                                                   strides=1,
-                                                  padding='SAME'), self.params.filters_biases[0])), conv_1_miss),
-                                 axis=0))
+                                                  padding='SAME'), self.params.filters_biases[0]))),
+                                axis=0)
+                             )
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
@@ -263,21 +263,21 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                            {'num_sample': 20, 'epoch': 100, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 1.0},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5}]}
+        # {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 25 , 'gamma': 0.0}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
+                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
+                                            {'num_sample': 20, 'epoch': 50, 'gamma': 0.5},
+                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0},
+                                            {'num_sample': 100, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
+                                                {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                                {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]}
 
     ]
-    f = open('loss_results_classification_conv', "a")
+    f = open('loss_results_classification_conv_25', "a")
     train_losses = []
     test_losses = []
     for eleme in params:
