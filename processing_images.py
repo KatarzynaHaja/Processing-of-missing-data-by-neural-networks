@@ -28,11 +28,11 @@ class DatasetProcessor:
                     dataset_dir, ", ".join(filenames)))
         dataset_train = sio.loadmat('svhn_data/train_32x32.mat')
         data_train = dataset_train["X"].transpose(3, 0, 1, 2)/255
-        dataset_train['y'][np.where(dataset_train['y'] == 10 )] = 0
+        dataset_train['y'][np.where(dataset_train['y'] == 10)] = 0
         labels_train = dataset_train['y']
         dataset_test = sio.loadmat('svhn_data/test_32x32.mat')
         data_test = dataset_test["X"].transpose(3, 0, 1, 2)/255
-        dataset_test['y'][np.where(dataset_train['y'] == 10 )] = 0
+        dataset_test['y'][np.where(dataset_train['y'] == 10)] = 0
         labels_test = dataset_train['y']
 
         return data_train, data_test, labels_train, labels_test

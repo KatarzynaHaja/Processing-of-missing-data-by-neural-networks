@@ -7,13 +7,11 @@ import numpy as np
 import sys
 import os
 
-from visualization import Visualizator
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class ClassificationCNNParams:
-    def __init__(self, method, dataset, num_sample=None, learning_rate=0.001):
+    def __init__(self, method, dataset, num_sample=None, learning_rate=None):
         initializer = tf.contrib.layers.variance_scaling_initializer()
 
         self.width = 28
@@ -31,9 +29,6 @@ class ClassificationCNNParams:
 
         self.num_output = 10
 
-        self.num_layers = 6
-
-        self.nn = 100
         self.method = method
         self.dataset = dataset
         self.num_sample = num_sample
@@ -84,12 +79,6 @@ class ClassificationCNN:
             self.sampling = Sampling(num_sample=self.params.num_sample, params=self.params, x_miss=self.x_miss,
                                      n_distribution=self.n_distribution,
                                      method=self.params.method)
-            self.reshaped_x_known = tf.cond(tf.equal(tf.size(self.x_known), 0),
-                                            lambda: self.x_known,
-                                            lambda: tf.reshape(self.x_known,
-                                                               shape=(
-                                                               self.size[0], self.params.width, self.params.length,
-                                                               self.params.num_channels)))
 
         if self.params.method == 'imputation':
             self.reshaped_X = tf.reshape(self.X,
@@ -122,16 +111,7 @@ class ClassificationCNN:
                                                      self.params.width * self.params.length,
                                                      self.gamma)
 
-            conv_1_miss = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
-            conv_1 = tf.cond(tf.equal(tf.size(self.x_known), 0),
-                             lambda: conv_1_miss,
-                             lambda: tf.concat((conv_1_miss, tf.nn.relu(
-                                 tf.add(
-                                     tf.nn.conv2d(input=self.reshaped_x_known, filters=self.params.filters_weights[0],
-                                                  strides=1,
-                                                  padding='SAME'), self.params.filters_biases[0]))),
-                                axis=0)
-                             )
+            conv_1 = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
@@ -170,7 +150,7 @@ class ClassificationCNN:
         return layer_fc_2
 
     def main_loop(self, n_epochs):
-        batch_size = 64
+        batch_size = 32
 
         loss = None
 
@@ -202,7 +182,7 @@ class ClassificationCNN:
             acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels, 1),
                                               predictions=tf.argmax(y_pred, 1))
 
-        optimizer = tf.train.RMSPropOptimizer(self.params.learning_rate).minimize(loss)
+        optimizer = tf.train.AdamOptimizer(self.params.learning_rate).minimize(loss)
 
         init = tf.global_variables_initializer()
         init_loc = tf.local_variables_initializer()
@@ -212,6 +192,7 @@ class ClassificationCNN:
             sess.run(init)
             sess.run(init_loc)
             for epoch in range(1, n_epochs + 1):
+                losses = []
                 n_batches = self.data_train.shape[0] // batch_size
                 l = np.inf
                 for iteration in range(n_batches):
@@ -225,11 +206,12 @@ class ClassificationCNN:
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
-                print("Train loss", l)
+                    losses.append(l)
+                print("Train loss", sum(losses)/len(losses))
 
-                train_loss.append(l)
+                train_loss.append(sum(losses)/len(losses))
 
-            test_loss = []
+            test_losses = []
             for i in range(self.data_test.shape[0] // 2):
                 if self.params.method != 'imputation':
                     batch_x = self.data_test[i * 2: (i + 1) * 2, :]
@@ -241,14 +223,19 @@ class ClassificationCNN:
                 accuracy, accuracy_op, tl = sess.run([acc, acc_op, loss],
                                                      feed_dict={self.X: batch_x, self.labels: labels})
 
-            print("Accuracy:", accuracy_op, "Train loss:", tl)
-            test_loss.append(tl)
+                test_losses.append(tl)
+
+            test_loss = sum(test_losses)/len(test_losses)
+
+            print("Accuracy:", accuracy_op, "Test loss:", test_loss)
+
         return accuracy_op, test_loss, train_loss
 
 
 def run_model():
     dataset_processor = DatasetProcessor(dataset='mnist')
     X = dataset_processor.load_data()
+
     data_train = X.train.images
     data_test = X.test.images
     labels_train = X.train.labels
@@ -263,15 +250,14 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        # {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 25 , 'gamma': 0.0}]},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
         {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
                                              {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
                                              {'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
         {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
                                             {'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
                                             {'num_sample': 20, 'epoch': 50, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0},
-                                            {'num_sample': 100, 'epoch': 50, 'gamma': 0.0}]},
+                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0}]},
         {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
                                                 {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
                                                 {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]}
@@ -283,7 +269,7 @@ def run_model():
     for eleme in params:
         for param in eleme['params']:
             p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'],
-                                        learning_rate=param.get('learning_rate', 0.001))
+                                        learning_rate=param.get('learning_rate', 0.0001))
             a = ClassificationCNN(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                                   data_imputed_test=data_imputed_test,
                                   gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
