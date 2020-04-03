@@ -264,8 +264,6 @@ def run_model():
 
     ]
     f = open('loss_results_classification_conv_25', "a")
-    train_losses = []
-    test_losses = []
     for eleme in params:
         for param in eleme['params']:
             p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'],
@@ -274,8 +272,6 @@ def run_model():
                                   data_imputed_test=data_imputed_test,
                                   gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
             accuracy, test_loss, train_loss = a.main_loop(param['epoch'])
-            test_losses.append(test_loss)
-            train_losses.append(train_loss)
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(accuracy))
             f.write('\n')

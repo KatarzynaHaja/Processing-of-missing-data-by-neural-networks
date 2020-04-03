@@ -97,9 +97,31 @@ class Sampling:
         if self.method != 'first_layer':
             return layer_1_m
 
+    def nr_autoencoder(self, output):
+        reshaped_output = tf.reshape(output, shape=(
+            self.size[0] * self.num_sample, self.params.width, self.params.length, self.params.num_channels))
+        layer_1_m = tf.nn.relu(
+            tf.add(
+                tf.nn.conv2d(input=reshaped_output, filters=self.params.encoder_filters_weights[0], strides=1,
+                             padding='SAME'),
+                self.params.encoder_filters_biases[0]))
+
+        if self.method == 'first_layer':
+            return self.mean_sample_autoencoder(layer_1_m)
+        if self.method != 'first_layer':
+            return layer_1_m
+
     def mean_sample(self, input, dims):
         shape = [self.num_sample, self.size[0]]
         shape.extend(dims)
         unreshaped = tf.reshape(input, shape=shape)
+        mean = tf.reduce_mean(unreshaped, axis=0)
+        return mean
+
+
+    def mean_sample_autoencoder(self, input):
+        unreshaped = tf.reshape(input,
+                                 shape=[self.num_sample, self.size[0], input.shape[1].value, input.shape[2].value,
+                                        input.shape[3].value])
         mean = tf.reduce_mean(unreshaped, axis=0)
         return mean

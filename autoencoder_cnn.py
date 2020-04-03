@@ -27,7 +27,7 @@ class AutoencoderCNNParams:
             'conv2_filters': [3, 3, 16, 8],
             'max_pool_2_ksize': 2,
             'max_pool_2_stride': 2,
-            'conv3_filters': [3, 3, 7, 8],
+            'conv3_filters': [3, 3, 8, 8],
             'max_pool_3_ksize': 2,
             'max_pool_3_stride': 2,
 
@@ -43,9 +43,6 @@ class AutoencoderCNNParams:
             'conv4_filters': [3, 3, 16, 1]
 
         }
-
-        self.flatten_1 = [64 * 7 * 7, 128]
-        self.flatten_2 = [128, 10]
 
         self.num_output = 10
 
@@ -72,8 +69,8 @@ class AutoencoderCNNParams:
             self.encoder_filters_biases.append(tf.Variable(tf.random_normal([self.encoder_filters[i][-1]])))
 
         for i in range(len(self.decoder_filters)):
-            self.decoder_filters_weights.append(tf.Variable(initializer(self.encoder_filters[i])))
-            self.decoder_filters_biases.append(tf.Variable(tf.random_normal([self.encoder_filters[i][-1]])))
+            self.decoder_filters_weights.append(tf.Variable(initializer(self.decoder_filters[i])))
+            self.decoder_filters_biases.append(tf.Variable(tf.random_normal([self.decoder_filters[i][-1]])))
 
 
 class AutoencoderCNN:
@@ -132,7 +129,7 @@ class AutoencoderCNN:
                                                      self.params.width * self.params.length,
                                                      self.gamma)
 
-            conv_1 = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
+            conv_1 = self.sampling.nr_autoencoder(samples)
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
@@ -169,41 +166,41 @@ class AutoencoderCNN:
         return encoded
 
     def decoder(self, encoded):
-        upsample1 = tf.image.resize_nearest_neighbor(encoded, self.params.decoder_layer['resize_1'])
+        upsample1 = tf.image.resize_nearest_neighbor(encoded, self.params.decoder_layers['resize_1'])
         # Now 7x7x8
 
         conv_4 = tf.nn.relu(
             tf.add(tf.nn.conv2d(input=upsample1, filters=self.params.decoder_filters_weights[0], strides=1,
                                 padding='SAME'),
-                   self.params.encoder_filters_biases[0]))
+                   self.params.decoder_filters_biases[0]))
 
         # Now 7x7x8
-        upsample2 = tf.image.resize_nearest_neighbor(conv_4, self.params.decoder_layer['resize_2'])
+        upsample2 = tf.image.resize_nearest_neighbor(conv_4, self.params.decoder_layers['resize_2'])
         # Now 14x14x8
         conv_5 = tf.nn.relu(
             tf.add(tf.nn.conv2d(input=upsample2, filters=self.params.decoder_filters_weights[1], strides=1,
                                 padding='SAME'),
-                   self.params.encoder_filters_biases[1]))
+                   self.params.decoder_filters_biases[1]))
 
         # Now 14x14x8
-        upsample3 = tf.image.resize_nearest_neighbor(conv_5, self.params.decoder_layer['resize_3'])
+        upsample3 = tf.image.resize_nearest_neighbor(conv_5, self.params.decoder_layers['resize_3'])
         # Now 28x28x8
         conv_6 = tf.nn.relu(
             tf.add(tf.nn.conv2d(input=upsample3, filters=self.params.decoder_filters_weights[2], strides=1,
                                 padding='SAME'),
-                   self.params.encoder_filters_biases[2]))
+                   self.params.decoder_filters_biases[2]))
 
         # Now 28x28x16
         logits = tf.add(tf.nn.conv2d(input=conv_6, filters=self.params.decoder_filters_weights[3], strides=1,
                                      padding='SAME'),
-                        self.params.encoder_filters_biases[3])
+                        self.params.decoder_filters_biases[3])
 
         if self.params.method != 'last_layer':
             return logits
 
         if self.params.method == 'last_layer':
             input = logits[:self.size[0] * self.params.num_sample, :]
-            layer_fc_2 = self.sampling.mean_sample(input, None)
+            layer_fc_2 = self.sampling.mean_sample_autoencoder(input)
             return layer_fc_2
 
         return logits
@@ -220,7 +217,8 @@ class AutoencoderCNN:
         decoder_op = self.decoder(encoder_op)
 
         y_pred = decoder_op  # prediction
-        y_true = tf.concat((self.x_known, self.x_miss), axis=0)  # z nanami
+        y_true = tf.reshape(self.X, shape=(self.size[0], self.params.width, self.params.length,
+                                           self.params.num_channels))  # z nanami
 
         if self.params.method != 'different_cost':
             where_isnan = tf.is_nan(y_true)
@@ -230,8 +228,8 @@ class AutoencoderCNN:
 
         if self.params.method == 'different_cost':
             y_true = tf.expand_dims(y_true, 0)
-            y_true = tf.tile(y_true, [self.params.num_sample, 1, 1])
-            y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.size[0], self.params.num_input))
+            y_true = tf.tile(y_true, [self.params.num_sample, 1, 1, 1, 1])
+            y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.size[0], self.params.width, self.params.width, self.params.num_channels))
             where_isnan = tf.is_nan(y_true)
             y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[
                           :self.size[0] * self.params.num_sample, :]
@@ -247,7 +245,8 @@ class AutoencoderCNN:
         init = tf.global_variables_initializer()
 
         v = Visualizator(
-            'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
+            'result_cnn_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(
+                self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
         train_loss = []
         with tf.Session() as sess:
@@ -282,6 +281,7 @@ class AutoencoderCNN:
                     g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
                     for j in range(self.params.nn):
                         v.draw_mnist_image(i, j, g, self.params.method)
+                    test_loss.append(l_test)
 
             if self.params.dataset == 'svhn':
                 n = 16
@@ -313,7 +313,7 @@ def run_model():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('original_data', "".join(
+        plt.savefig(os.path.join('original_data_cnn', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
@@ -324,11 +324,10 @@ def run_model():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('image_with_patch', "".join(
+        plt.savefig(os.path.join('image_with_patch_cnn', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
-
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
 
@@ -336,18 +335,18 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                            {'num_sample': 20, 'epoch': 100, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 1.0},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5}]}
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
+                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
+                                            {'num_sample': 20, 'epoch': 50, 'gamma': 0.5},
+                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0},
+                                            {'num_sample': 100, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
+                                                {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
+                                                {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]}
 
     ]
     f = open('loss_results_autoencoder_conv', "a")
@@ -360,6 +359,8 @@ def run_model():
             train_loss, test_loss = a.autoencoder_main_loop(param['epoch'])
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(test_loss))
+            f.write('\n')
+            f.write('Test loss:' + str(test_loss))
             f.write('\n')
             f.write('Train loss:' + str(train_loss))
             f.write('\n')
