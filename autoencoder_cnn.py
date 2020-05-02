@@ -44,6 +44,11 @@ class AutoencoderCNNParams:
 
         }
 
+        self.flatten_1_encoder = [4 * 4 * 128, 128]
+        self.flatten_2_encoder = [128, 64]
+        self.flatten_1_decoder = [64, 128]
+        self.flatten_2_decoder = [128, 128]
+
         self.num_output = 10
 
         self.num_layers = 6
@@ -55,9 +60,10 @@ class AutoencoderCNNParams:
         self.learning_rate = learning_rate
 
         self.encoder_filters = [self.encoder_layers['conv1_filters'], self.encoder_layers['conv2_filters'],
-                                self.encoder_layers['conv3_filters']]
-        self.decoder_filters = [self.decoder_layers['conv1_filters'], self.decoder_layers['conv2_filters'],
-                                self.decoder_layers['conv3_filters'], self.decoder_layers['conv4_filters']]
+                                self.encoder_layers['conv3_filters'], self.flatten_1_encoder, self.flatten_2_encoder]
+        self.decoder_filters = [self.flatten_1_decoder, self.flatten_2_decoder, self.decoder_layers['conv1_filters'], self.decoder_layers['conv2_filters'],
+                                self.decoder_layers['conv3_filters'], self.decoder_layers['conv4_filters']
+                                ]
         self.encoder_filters_weights = []
         self.encoder_filters_biases = []
         self.decoder_filters_weights = []
@@ -158,14 +164,39 @@ class AutoencoderCNN:
                                 padding='SAME'),
                    self.params.encoder_filters_biases[2]))
         # Now 7x7x8
-        encoded = tf.nn.max_pool2d(input=conv_3, ksize=self.params.encoder_layers['max_pool_3_ksize'],
-                                   strides=self.params.encoder_layers['max_pool_3_stride'], padding='SAME')
+        max_pooling_3 = tf.nn.max_pool2d(input=conv_3, ksize=self.params.encoder_layers['max_pool_3_ksize'],
+                                         strides=self.params.encoder_layers['max_pool_3_stride'], padding='SAME')
 
         # Now 4x4x8
 
-        return encoded
+        if self.params.method != 'first_layer':
+            reshaped_max_pooling_3 = tf.reshape(tensor=max_pooling_3,
+                                                shape=(self.size[0] * self.params.num_sample, 4 * 4 * 8))
+
+        else:
+            reshaped_max_pooling_3 = tf.reshape(tensor=max_pooling_2,
+                                                shape=(self.size[0], 4 * 4 * 8))
+
+        flatten_1 = tf.nn.relu(
+            tf.add(tf.matmul(reshaped_max_pooling_3, self.params.encoder_filters_weights[3]),
+                   self.params.encoder_filters_biases[3]))
+
+        flatten_2 = tf.nn.relu(
+            tf.add(tf.matmul(flatten_1, self.params.encoder_filters_weights[4]),
+                   self.params.encoder_filters_biases[4]))
+
+        return flatten_2
 
     def decoder(self, encoded):
+
+        flatten_decoder_1 = tf.nn.relu(
+            tf.add(tf.matmul(encoded, self.params.decoder_filters_weights[0]),
+                   self.params.decoder_filters_biases[0]))
+
+        flatten_decoder_2 = tf.nn.relu(
+            tf.add(tf.matmul(flatten_decoder_1, self.params.decoder_filters_weights[1]),
+                   self.params.decoder_filters_biases[1]))
+
         upsample1 = tf.image.resize_nearest_neighbor(encoded, self.params.decoder_layers['resize_1'])
         # Now 7x7x8
 
@@ -191,19 +222,30 @@ class AutoencoderCNN:
                    self.params.decoder_filters_biases[2]))
 
         # Now 28x28x16
-        logits = tf.add(tf.nn.conv2d(input=conv_6, filters=self.params.decoder_filters_weights[3], strides=1,
-                                     padding='SAME'),
-                        self.params.decoder_filters_biases[3])
+        conv_7 = tf.nn.relu(tf.add(tf.nn.conv2d(input=conv_6, filters=self.params.decoder_filters_weights[3], strides=1,
+                                                padding='SAME'),
+                                   self.params.decoder_filters_biases[3]))
+
+        reshaped_conv_3 = tf.reshape(tensor=conv_7,
+                                     shape=(self.size[0], 28 * 28 * 16))
+
+        flatten_1 = tf.nn.relu(
+            tf.add(tf.matmul(reshaped_conv_3, self.params.encoder_filters_weights[4]),
+                   self.params.encoder_filters_biases[4]))
+
+        flatten_2 = tf.nn.relu(
+            tf.add(tf.matmul(flatten_1, self.params.encoder_filters_weights[5]),
+                   self.params.encoder_filters_biases[5]))
 
         if self.params.method != 'last_layer':
-            return logits
+            return flatten_2
 
         if self.params.method == 'last_layer':
-            input = logits[:self.size[0] * self.params.num_sample, :]
+            input = flatten_2[:self.size[0] * self.params.num_sample, :]
             layer_fc_2 = self.sampling.mean_sample_autoencoder(input)
             return layer_fc_2
 
-        return logits
+        return flatten_2
 
     def autoencoder_main_loop(self, n_epochs):
         learning_rate = 0.01
@@ -229,7 +271,8 @@ class AutoencoderCNN:
         if self.params.method == 'different_cost':
             y_true = tf.expand_dims(y_true, 0)
             y_true = tf.tile(y_true, [self.params.num_sample, 1, 1, 1, 1])
-            y_true = tf.reshape(y_true, shape=(self.params.num_sample * self.size[0], self.params.width, self.params.width, self.params.num_channels))
+            y_true = tf.reshape(y_true, shape=(
+                self.params.num_sample * self.size[0], self.params.width, self.params.width, self.params.num_channels))
             where_isnan = tf.is_nan(y_true)
             y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[
                           :self.size[0] * self.params.num_sample, :]
@@ -309,26 +352,26 @@ def run_model():
     data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
     data_test = np.random.permutation(data_test)
     data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('original_data_cnn', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('original_data_cnn', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
 
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('image_with_patch_cnn', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
-
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('image_with_patch_cnn', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
+    #
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
 
     data_imputed_train = imp.fit_transform(data_train)
