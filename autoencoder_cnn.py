@@ -61,7 +61,8 @@ class AutoencoderCNNParams:
 
         self.encoder_filters = [self.encoder_layers['conv1_filters'], self.encoder_layers['conv2_filters'],
                                 self.encoder_layers['conv3_filters'], self.flatten_1_encoder, self.flatten_2_encoder]
-        self.decoder_filters = [self.flatten_1_decoder, self.flatten_2_decoder, self.decoder_layers['conv1_filters'], self.decoder_layers['conv2_filters'],
+        self.decoder_filters = [self.flatten_1_decoder, self.flatten_2_decoder, self.decoder_layers['conv1_filters'],
+                                self.decoder_layers['conv2_filters'],
                                 self.decoder_layers['conv3_filters'], self.decoder_layers['conv4_filters']
                                 ]
         self.encoder_filters_weights = []
@@ -197,27 +198,46 @@ class AutoencoderCNN:
             tf.add(tf.matmul(flatten_decoder_1, self.params.decoder_filters_weights[1]),
                    self.params.decoder_filters_biases[1]))
 
-        upsample1 = tf.image.resize_nearest_neighbor(encoded, self.params.decoder_layers['resize_1'])
+        # Now: 128
+
+        reshaped_flatten = tf.reshape(tensor=flatten_decoder_2,
+                                      shape=(self.size[0], 4 * 4 * 8))
+
+        upsample_1 = tf.nn.conv2d_transpose(
+            reshaped_flatten, filters= [4,4,8,8], output_shape =  , strides=1, padding='SAME', data_format='NHWC',
+            dilations=None, name=None
+        )
+
+        #upsample1 = tf.image.resize_nearest_neighbor(reshaped_flatten, self.params.decoder_layers['resize_1'])
         # Now 7x7x8
 
         conv_4 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample1, filters=self.params.decoder_filters_weights[0], strides=1,
+            tf.add(tf.nn.conv2d(input=upsample_1, filters=self.params.decoder_filters_weights[0], strides=1,
                                 padding='SAME'),
                    self.params.decoder_filters_biases[0]))
 
         # Now 7x7x8
-        upsample2 = tf.image.resize_nearest_neighbor(conv_4, self.params.decoder_layers['resize_2'])
+        #upsample2 = tf.image.resize_nearest_neighbor(conv_4, self.params.decoder_layers['resize_2'])
+
+        upsample_2 = tf.nn.conv2d_transpose(
+            conv_4, filters=[4, 4, 8, 8], output_shape=, strides=1, padding='SAME', data_format='NHWC',
+            dilations=None, name=None
+        )
         # Now 14x14x8
         conv_5 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample2, filters=self.params.decoder_filters_weights[1], strides=1,
+            tf.add(tf.nn.conv2d(input=upsample_2, filters=self.params.decoder_filters_weights[1], strides=1,
                                 padding='SAME'),
                    self.params.decoder_filters_biases[1]))
 
         # Now 14x14x8
-        upsample3 = tf.image.resize_nearest_neighbor(conv_5, self.params.decoder_layers['resize_3'])
+        #upsample3 = tf.image.resize_nearest_neighbor(conv_5, self.params.decoder_layers['resize_3'])
+        upsample_3 = tf.nn.conv2d_transpose(
+            conv_4, filters=[4, 4, 8, 8], output_shape=, strides=1, padding='SAME', data_format='NHWC',
+            dilations=None, name=None
+        )
         # Now 28x28x8
         conv_6 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample3, filters=self.params.decoder_filters_weights[2], strides=1,
+            tf.add(tf.nn.conv2d(input=upsample_3, filters=self.params.decoder_filters_weights[2], strides=1,
                                 padding='SAME'),
                    self.params.decoder_filters_biases[2]))
 
@@ -226,26 +246,15 @@ class AutoencoderCNN:
                                                 padding='SAME'),
                                    self.params.decoder_filters_biases[3]))
 
-        reshaped_conv_3 = tf.reshape(tensor=conv_7,
-                                     shape=(self.size[0], 28 * 28 * 16))
-
-        flatten_1 = tf.nn.relu(
-            tf.add(tf.matmul(reshaped_conv_3, self.params.encoder_filters_weights[4]),
-                   self.params.encoder_filters_biases[4]))
-
-        flatten_2 = tf.nn.relu(
-            tf.add(tf.matmul(flatten_1, self.params.encoder_filters_weights[5]),
-                   self.params.encoder_filters_biases[5]))
 
         if self.params.method != 'last_layer':
-            return flatten_2
+            return conv_7
 
-        if self.params.method == 'last_layer':
-            input = flatten_2[:self.size[0] * self.params.num_sample, :]
-            layer_fc_2 = self.sampling.mean_sample_autoencoder(input)
-            return layer_fc_2
+        else:
+            input = conv_7[:self.size[0] * self.params.num_sample, :]
+            mean_layer = self.sampling.mean_sample_autoencoder(input)
+            return mean_layer
 
-        return flatten_2
 
     def autoencoder_main_loop(self, n_epochs):
         learning_rate = 0.01
