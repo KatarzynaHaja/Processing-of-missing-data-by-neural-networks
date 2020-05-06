@@ -34,13 +34,13 @@ class AutoencoderCNNParams:
         }
 
         self.decoder_layers = {
-            'resize_1': (7, 7),
-            'conv1_filters': [3, 3, 8, 8],
-            'resize_2': (14, 14),
-            'conv2_filters': [3, 3, 8, 8],
-            'resize_3': (28, 28),
-            'conv3_filters': [3, 3, 8, 16],
-            'conv4_filters': [3, 3, 16, 1]
+            'deconvolution_1_filters': [4, 4, 8, 8],
+            'conv_4_filters': [3, 3, 8, 8],
+            'deconvolution_2_filters': [8, 8, 8, 8],
+            'conv_5_filters': [3, 3, 8, 8],
+            'deconvolution_3_filters': [15, 15, 8, 8],
+            'conv_6_filters': [3, 3, 8, 16],
+            'conv_7_filters': [3, 3, 16, 1]
 
         }
 
@@ -59,11 +59,20 @@ class AutoencoderCNNParams:
         self.num_sample = num_sample
         self.learning_rate = learning_rate
 
-        self.encoder_filters = [self.encoder_layers['conv1_filters'], self.encoder_layers['conv2_filters'],
-                                self.encoder_layers['conv3_filters'], self.flatten_1_encoder, self.flatten_2_encoder]
-        self.decoder_filters = [self.flatten_1_decoder, self.flatten_2_decoder, self.decoder_layers['conv1_filters'],
-                                self.decoder_layers['conv2_filters'],
-                                self.decoder_layers['conv3_filters'], self.decoder_layers['conv4_filters']
+        self.encoder_filters = [self.encoder_layers['conv1_filters'],
+                                self.encoder_layers['conv2_filters'],
+                                self.encoder_layers['conv3_filters'],
+                                self.flatten_1_encoder,
+                                self.flatten_2_encoder]
+        self.decoder_filters = [self.flatten_1_decoder,
+                                self.flatten_2_decoder,
+                                self.decoder_layers['deconvolution_1_filters'],
+                                self.decoder_layers['conv_4_filters'],
+                                self.decoder_layers['deconvolution_2_filters'],
+                                self.decoder_layers['conv_5_filters'],
+                                self.decoder_layers['deconvolution_3_filters'],
+                                self.decoder_layers['conv_6_filters'],
+                                self.decoder_layers['conv_7_filters']
                                 ]
         self.encoder_filters_weights = []
         self.encoder_filters_biases = []
@@ -203,49 +212,61 @@ class AutoencoderCNN:
         reshaped_flatten = tf.reshape(tensor=flatten_decoder_2,
                                       shape=(self.size[0], 4 * 4 * 8))
 
-        upsample_1 = tf.nn.conv2d_transpose(
-            reshaped_flatten, filters= [4,4,8,8], output_shape =  , strides=1, padding='SAME', data_format='NHWC',
-            dilations=None, name=None
-        )
+        deconvolution_1 = tf.nn.relu(
+            tf.add(tf.nn.conv2d_transpose(
+                reshaped_flatten, filters=self.params.decoder_filters_weights[2], output_shape=[7, 7, 8, 8], strides=1,
+                padding='SAME',
+                data_format='NHWC',
+                dilations=None, name=None
+            ), self.params.decoder_filters_biases[2]))
 
-        #upsample1 = tf.image.resize_nearest_neighbor(reshaped_flatten, self.params.decoder_layers['resize_1'])
         # Now 7x7x8
 
         conv_4 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample_1, filters=self.params.decoder_filters_weights[0], strides=1,
+            tf.add(tf.nn.conv2d(input=deconvolution_1, filters=self.params.decoder_filters_weights[3], strides=1,
                                 padding='SAME'),
-                   self.params.decoder_filters_biases[0]))
+                   self.params.decoder_filters_biases[3]))
 
         # Now 7x7x8
-        #upsample2 = tf.image.resize_nearest_neighbor(conv_4, self.params.decoder_layers['resize_2'])
 
-        upsample_2 = tf.nn.conv2d_transpose(
-            conv_4, filters=[4, 4, 8, 8], output_shape=, strides=1, padding='SAME', data_format='NHWC',
-            dilations=None, name=None
-        )
+        deconvolution_2 = tf.nn.relu(
+            tf.add(tf.nn.conv2d_transpose(
+                reshaped_flatten, filters=self.params.decoder_filters_weights[4], output_shape=[14, 14, 8, 8],
+                strides=1,
+                padding='SAME',
+                data_format='NHWC',
+                dilations=None, name=None
+            ), self.params.decoder_filters_biases[4]))
+
         # Now 14x14x8
         conv_5 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample_2, filters=self.params.decoder_filters_weights[1], strides=1,
+            tf.add(tf.nn.conv2d(input=deconvolution_2, filters=self.params.decoder_filters_weights[5], strides=1,
                                 padding='SAME'),
-                   self.params.decoder_filters_biases[1]))
+                   self.params.decoder_filters_biases[5]))
 
         # Now 14x14x8
-        #upsample3 = tf.image.resize_nearest_neighbor(conv_5, self.params.decoder_layers['resize_3'])
-        upsample_3 = tf.nn.conv2d_transpose(
-            conv_4, filters=[4, 4, 8, 8], output_shape=, strides=1, padding='SAME', data_format='NHWC',
-            dilations=None, name=None
-        )
+
+        deconvolution_3 = tf.nn.relu(
+            tf.add(tf.nn.conv2d_transpose(
+                reshaped_flatten, filters=self.params.decoder_filters_weights[6], output_shape=[28, 28, 8, 8],
+                strides=1,
+                padding='SAME',
+                data_format='NHWC',
+                dilations=None, name=None
+            ), self.params.decoder_filters_biases[6]))
+
         # Now 28x28x8
         conv_6 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=upsample_3, filters=self.params.decoder_filters_weights[2], strides=1,
+            tf.add(tf.nn.conv2d(input=deconvolution_3, filters=self.params.decoder_filters_weights[7], strides=1,
                                 padding='SAME'),
-                   self.params.decoder_filters_biases[2]))
+                   self.params.decoder_filters_biases[7]))
 
         # Now 28x28x16
-        conv_7 = tf.nn.relu(tf.add(tf.nn.conv2d(input=conv_6, filters=self.params.decoder_filters_weights[3], strides=1,
+        conv_7 = tf.nn.relu(tf.add(tf.nn.conv2d(input=conv_6, filters=self.params.decoder_filters_weights[8], strides=1,
                                                 padding='SAME'),
-                                   self.params.decoder_filters_biases[3]))
+                                   self.params.decoder_filters_biases[8]))
 
+        # Now 28x28x1
 
         if self.params.method != 'last_layer':
             return conv_7
@@ -254,7 +275,6 @@ class AutoencoderCNN:
             input = conv_7[:self.size[0] * self.params.num_sample, :]
             mean_layer = self.sampling.mean_sample_autoencoder(input)
             return mean_layer
-
 
     def autoencoder_main_loop(self, n_epochs):
         learning_rate = 0.01
