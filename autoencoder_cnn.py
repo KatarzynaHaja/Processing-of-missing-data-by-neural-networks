@@ -25,8 +25,6 @@ class AutoencoderCNNParams:
             'max_pool_1_ksize': 2,
             'max_pool_1_stride': 2,
             'conv2_filters': [3, 3, 16, 8],
-            'max_pool_2_ksize': 2,
-            'max_pool_2_stride': 2,
             'conv3_filters': [3, 3, 8, 8],
             'max_pool_3_ksize': 2,
             'max_pool_3_stride': 2,
@@ -40,10 +38,10 @@ class AutoencoderCNNParams:
             'deconvolution_3_filters': [3, 3, 1, 16],
         }
 
-        self.flatten_1_encoder = [128, 128]
+        self.flatten_1_encoder = [7*7*8, 128]
         self.flatten_2_encoder = [128, 64]
         self.flatten_1_decoder = [64, 128]
-        self.flatten_2_decoder = [128, 128]
+        self.flatten_2_decoder = [128, 7*7*8]
 
         self.num_output = 10
 
@@ -157,27 +155,23 @@ class AutoencoderCNN:
 
         # Now 14x14x8
 
-        max_pooling_2 = tf.nn.max_pool2d(input=conv_2, ksize=self.params.encoder_layers['max_pool_2_ksize'],
-                                         strides=self.params.encoder_layers['max_pool_2_stride'], padding='SAME')
-
-        # Now 7x7x8
         conv_3 = tf.nn.relu(
-            tf.add(tf.nn.conv2d(input=max_pooling_2, filters=self.params.encoder_filters_weights[2], strides=1,
+            tf.add(tf.nn.conv2d(input=conv_2, filters=self.params.encoder_filters_weights[2], strides=1,
                                 padding='SAME'),
                    self.params.encoder_filters_biases[2]))
-        # Now 7x7x8
+        # Now 14x14x8
         max_pooling_3 = tf.nn.max_pool2d(input=conv_3, ksize=self.params.encoder_layers['max_pool_3_ksize'],
                                          strides=self.params.encoder_layers['max_pool_3_stride'], padding='SAME')
 
-        # Now 4x4x8
+        # Now 7x7x8
 
         if self.params.method != 'first_layer':
             reshaped_max_pooling_3 = tf.reshape(tensor=max_pooling_3,
-                                                shape=(self.size[0] * self.params.num_sample, 4 * 4 * 8))
+                                                shape=(self.size[0] * self.params.num_sample, 7 * 7 * 8))
 
         else:
-            reshaped_max_pooling_3 = tf.reshape(tensor=max_pooling_2,
-                                                shape=(self.size[0], 4 * 4 * 8))
+            reshaped_max_pooling_3 = tf.reshape(tensor=max_pooling_3,
+                                                shape=(self.size[0], 7 * 7 * 8))
 
         flatten_1 = tf.nn.relu(
             tf.add(tf.matmul(reshaped_max_pooling_3, self.params.encoder_filters_weights[3]),
@@ -206,9 +200,9 @@ class AutoencoderCNN:
         # Now: 128
 
         reshaped_flatten = tf.reshape(tensor=flatten_decoder_2,
-                                      shape=(self.size[0], 4, 4, 8))
+                                      shape=(self.size[0], 7, 7, 8))
 
-        # Now (?,4,4,8)
+        # Now (?,7,7,8)
 
         deconvolution_1 = tf.nn.relu(
             tf.add(tf.nn.conv2d_transpose(
