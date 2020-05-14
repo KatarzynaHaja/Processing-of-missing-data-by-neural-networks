@@ -36,8 +36,8 @@ class AutoencoderCNNParams:
 
         self.decoder_layers = {
             'deconvolution_1_filters': [3, 3, 8, 8],
-            'deconvolution_2_filters': [3, 3, 8, 16],
-            'deconvolution_3_filters': [3, 3, 16, 1],
+            'deconvolution_2_filters': [3, 3, 16, 8],
+            'deconvolution_3_filters': [3, 3, 1, 16],
         }
 
         self.flatten_1_encoder = [128, 128]
