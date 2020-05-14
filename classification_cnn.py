@@ -207,9 +207,11 @@ class ClassificationCNN:
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
                     losses.append(l)
-                print("Train loss", sum(losses)/len(losses))
 
-                train_loss.append(sum(losses)/len(losses))
+                t = sum(losses)/len(losses)
+                print("Train loss",t)
+
+                train_loss.append(t)
 
             test_losses = []
             for i in range(self.data_test.shape[0] // 2):

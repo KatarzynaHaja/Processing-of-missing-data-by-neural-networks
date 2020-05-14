@@ -31,17 +31,16 @@ class AutoencoderCNNParams:
 
         }
 
-
         self.decoder_layers = {
-            'deconvolution_1_filters': [3, 3, 8, 8],
-            'deconvolution_2_filters': [3, 3, 16, 8],
-            'deconvolution_3_filters': [3, 3, 1, 16],
+            'deconvolution_1_filters': [3, 3, 16, 8],
+            'deconvolution_2_filters': [3, 3, 8, 16],
+            'deconvolution_3_filters': [3, 3, 1, 8],
         }
 
-        self.flatten_1_encoder = [7*7*8, 128]
+        self.flatten_1_encoder = [7 * 7 * 8, 128]
         self.flatten_2_encoder = [128, 64]
         self.flatten_1_decoder = [64, 128]
-        self.flatten_2_decoder = [128, 7*7*8]
+        self.flatten_2_decoder = [128, 7 * 7 * 8]
 
         self.num_output = 10
 
@@ -58,12 +57,12 @@ class AutoencoderCNNParams:
                                 self.encoder_layers['conv3_filters'],
                                 self.flatten_1_encoder,
                                 self.flatten_2_encoder]
-        self.decoder_filters = [self.flatten_1_decoder,
-                                self.flatten_2_decoder,
-                                self.decoder_layers['deconvolution_1_filters'],
+        self.decoder_filters_flatten = [self.flatten_1_decoder,
+                                        self.flatten_2_decoder]
+
+        self.decoder_filters = [self.decoder_layers['deconvolution_1_filters'],
                                 self.decoder_layers['deconvolution_2_filters'],
-                                self.decoder_layers['deconvolution_3_filters'],
-                                ]
+                                self.decoder_layers['deconvolution_3_filters']]
         self.encoder_filters_weights = []
         self.encoder_filters_biases = []
         self.decoder_filters_weights = []
@@ -74,9 +73,13 @@ class AutoencoderCNNParams:
             self.encoder_filters_weights.append(tf.Variable(initializer(self.encoder_filters[i])))
             self.encoder_filters_biases.append(tf.Variable(tf.random_normal([self.encoder_filters[i][-1]])))
 
+        for i in range(len(self.decoder_filters_flatten)):
+            self.decoder_filters_weights.append(tf.Variable(initializer(self.decoder_filters_flatten[i])))
+            self.decoder_filters_biases.append(tf.Variable(tf.random_normal([self.decoder_filters_flatten[i][-1]])))
+
         for i in range(len(self.decoder_filters)):
             self.decoder_filters_weights.append(tf.Variable(initializer(self.decoder_filters[i])))
-            self.decoder_filters_biases.append(tf.Variable(tf.random_normal([self.decoder_filters[i][-1]])))
+            self.decoder_filters_biases.append(tf.Variable(tf.random_normal([self.decoder_filters[i][-2]])))
 
 
 class AutoencoderCNN:
@@ -187,7 +190,11 @@ class AutoencoderCNN:
 
     def decoder(self, encoded):
 
-        self.samples_in_batch = self.params.num_sample * self.size[0]
+        if self.params.method != 'first_layer':
+            self.samples_in_batch = self.params.num_sample * self.size[0]
+
+        else:
+            self.samples_in_batch = self.size[0]
 
         flatten_decoder_1 = tf.nn.relu(
             tf.add(tf.matmul(encoded, self.params.decoder_filters_weights[0]),
@@ -200,14 +207,14 @@ class AutoencoderCNN:
         # Now: 128
 
         reshaped_flatten = tf.reshape(tensor=flatten_decoder_2,
-                                      shape=(self.size[0], 7, 7, 8))
+                                      shape=(self.samples_in_batch, 7, 7, 8))
 
         # Now (?,7,7,8)
 
         deconvolution_1 = tf.nn.relu(
             tf.add(tf.nn.conv2d_transpose(
                 reshaped_flatten, filters=self.params.decoder_filters_weights[2],
-                output_shape=[self.samples_in_batch, 7, 7, 8], strides=2,
+                output_shape=[self.samples_in_batch, 14, 14, 16], strides=2,
                 padding='SAME'
             ), self.params.decoder_filters_biases[2]))
 
@@ -216,8 +223,8 @@ class AutoencoderCNN:
         deconvolution_2 = tf.nn.relu(
             tf.add(tf.nn.conv2d_transpose(
                 deconvolution_1, filters=self.params.decoder_filters_weights[3],
-                output_shape=[self.samples_in_batch, 14, 14, 16],
-                strides=2,
+                output_shape=[self.samples_in_batch, 14, 14, 8],
+                strides=1,
                 padding='SAME'
             ), self.params.decoder_filters_biases[3]))
 
@@ -242,8 +249,8 @@ class AutoencoderCNN:
             return mean_layer
 
     def autoencoder_main_loop(self, n_epochs):
-        learning_rate = 0.01
-        batch_size = 64
+        learning_rate = 0.0001
+        batch_size = 16
 
         loss = None
 
@@ -253,25 +260,28 @@ class AutoencoderCNN:
         decoder_op = self.decoder(encoder_op)
 
         y_pred = decoder_op  # prediction
-        y_true = tf.reshape(self.X, shape=(self.size[0], self.params.width, self.params.length,
-                                           self.params.num_channels))  # z nanami
+        y_true = self.X
 
         if self.params.method != 'different_cost':
+            y_pred = tf.reshape(y_pred, shape=(self.size[0], self.params.width * self.params.length))
             where_isnan = tf.is_nan(y_true)
             y_pred = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)
             y_true = tf.where(where_isnan, tf.zeros_like(y_true), y_true)
             loss = tf.reduce_mean(tf.pow(y_true - y_pred, 2))
 
         if self.params.method == 'different_cost':
+            y_pred = tf.reshape(y_pred,
+                                shape=(self.size[0] * self.params.num_sample, self.params.width * self.params.length))
             y_true = tf.expand_dims(y_true, 0)
-            y_true = tf.tile(y_true, [self.params.num_sample, 1, 1, 1, 1])
-            y_true = tf.reshape(y_true, shape=(
-                self.params.num_sample * self.size[0], self.params.width, self.params.width, self.params.num_channels))
+            y_true = tf.tile(y_true, [self.params.num_sample, 1, 1])
+            y_true = tf.reshape(y_true,
+                                shape=(self.params.num_sample * self.size[0], self.params.width * self.params.length))
             where_isnan = tf.is_nan(y_true)
             y_pred_miss = tf.where(where_isnan, tf.zeros_like(y_pred), y_pred)[
                           :self.size[0] * self.params.num_sample, :]
             y_true_miss = tf.where(where_isnan, tf.zeros_like(y_true), y_true)[
                           :self.size[0] * self.params.num_sample, :]
+
             loss_miss = tf.reduce_mean(tf.reduce_mean(tf.pow(y_true_miss - y_pred_miss, 2), axis=1),
                                        axis=0)  # srednia najpierw (weznatrz po obrazku a potem po samplu)
             # loss_known = tf.reduce_mean(tf.pow(y_true_known - y_pred_known, 2)) czy tutaj nie powinno być axis=1 zamiast axis=2 ???
@@ -289,9 +299,10 @@ class AutoencoderCNN:
         with tf.Session() as sess:
             sess.run(init)
             for epoch in range(1, n_epochs + 1):
-                losses = []
+
                 n_batches = self.data_train.shape[0] // batch_size
                 l = np.inf
+                losses = []
                 for iteration in range(n_batches):
                     print("\r{}% ".format(100 * (iteration + 1) // n_batches), end="")
                     sys.stdout.flush()
@@ -302,10 +313,12 @@ class AutoencoderCNN:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
-                    losses.append(l)
-                print("Train loss", sum(losses) / len(losses))
 
-                train_loss.append(sum(losses) / len(losses))
+                    losses.append(l)
+
+                test_l = sum(losses)/len(losses)
+                print("Train loss", test_l)
+                train_loss.append(test_l)
 
             test_loss = []
             if self.params.dataset == 'mnist':
@@ -316,24 +329,9 @@ class AutoencoderCNN:
                         batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
                     g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
+                    g = g.reshape(self.params.nn, self.params.length * self.params.width * self.params.num_channels)
                     for j in range(self.params.nn):
                         v.draw_mnist_image(i, j, g, self.params.method)
-                    test_loss.append(l_test)
-
-            if self.params.dataset == 'svhn':
-                n = 16
-                for i in range(n):
-                    if self.params.method != 'imputation':
-                        batch_x = self.data_test[
-                                  (i * (self.data_test.shape[0]) // n):((i + 1) * (self.data_test.shape[0] // n)), :]
-                    else:
-                        batch_x = self.data_imputed_test[
-                                  (i * (self.data_test.shape[0] // n)):((i + 1) * (self.data_test.shape[0] // n)), :]
-
-                    g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-
-                    for j in range(self.data_test.shape[0] // n):
-                        v.draw_svhn_image(i, j, g, self.params.method)
                     test_loss.append(l_test)
 
         return train_loss, np.mean(test_loss)
@@ -357,15 +355,15 @@ def run_model():
 
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    # for j in range(1000):
-    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
-    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-    #     ax.axis('off')
-    #     plt.savefig(os.path.join('image_with_patch_cnn', "".join(
-    #         (str(j) + '.png'))),
-    #                 bbox_inches='tight')
-    #     plt.close()
-    #
+    for j in range(1000):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+        ax.axis('off')
+        plt.savefig(os.path.join('image_with_patch_cnn', "".join(
+            (str(j) + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
+
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
 
     data_imputed_train = imp.fit_transform(data_train)
@@ -377,13 +375,8 @@ def run_model():
                                              {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
                                              {'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
         {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
-                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
-                                            {'num_sample': 20, 'epoch': 50, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0},
-                                            {'num_sample': 100, 'epoch': 50, 'gamma': 0.0}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
-                                                {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]}
+                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]}
 
     ]
     f = open('loss_results_autoencoder_conv', "a")
