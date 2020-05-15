@@ -342,7 +342,7 @@ def run_the_best():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('original_data', "".join(
+        plt.savefig(os.path.join('autoencoder_cnn/original_data', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
@@ -353,7 +353,7 @@ def run_the_best():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('image_with_patch', "".join(
+        plt.savefig(os.path.join('results_ac_fc/image_with_patch', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
