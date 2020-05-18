@@ -93,7 +93,7 @@ class Sampling:
                 self.params.filters_biases[0]))
 
         if self.method == 'first_layer':
-            return self.mean_sample(layer_1_m, [self.params.width, self.params.length, output_dim])
+            return self.mean_sample(layer_1_m)
         if self.method != 'first_layer':
             return layer_1_m
 
@@ -111,9 +111,11 @@ class Sampling:
         if self.method != 'first_layer':
             return layer_1_m
 
-    def mean_sample(self, input, dims):
-        shape = [self.num_sample, self.size[0]]
-        shape.extend(dims)
+    def mean_sample(self, input, output_dim=None):
+        if output_dim:
+            shape = [self.num_sample, self.size[0], output_dim]
+        else:
+            shape = [self.num_sample, self.size[0], input.shape[1].value, input.shape[2].value, input.shape[3].value]
         unreshaped = tf.reshape(input, shape=shape)
         mean = tf.reduce_mean(unreshaped, axis=0)
         return mean

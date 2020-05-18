@@ -27,23 +27,25 @@ class DatasetProcessor:
                 "No SVHN files in directory: {}. Files {} expected.".format(
                     dataset_dir, ", ".join(filenames)))
         dataset_train = sio.loadmat('svhn_data/train_32x32.mat')
-        data_train = dataset_train["X"].transpose(3, 0, 1, 2)/255
+        data_train = dataset_train["X"].transpose(3, 0, 1, 2) / 255
         dataset_train['y'][np.where(dataset_train['y'] == 10)] = 0
-        labels_train = dataset_train['y']
+        labels_train = self.change_to_one_vector(dataset_train['y'])
+
         dataset_test = sio.loadmat('svhn_data/test_32x32.mat')
-        data_test = dataset_test["X"].transpose(3, 0, 1, 2)/255
-        dataset_test['y'][np.where(dataset_train['y'] == 10)] = 0
-        labels_test = dataset_train['y']
+        data_test = dataset_test["X"].transpose(3, 0, 1, 2) / 255
+        dataset_test['y'][np.where(dataset_test['y'] == 10)] = 0
+        labels_test = self.change_to_one_vector(dataset_test['y'])
 
         return data_train, data_test, labels_train, labels_test
 
-    def reshape_data_to_convolution(self, data):
-        if self.dataset == 'mnist':
-            return data.reshape(data.shape[0], 28, 28, 1)
-        else:
-            return data.reshape(data.shape[0], 32, 32, 3)
+    def reshape_svhn(self, data):
+        return data.reshape(data.shape[0], 32 * 32 * 3)
 
-    def random_mask_mnist(self):
+    def change_to_one_vector(self, data):
+        import pandas as pd
+        return pd.get_dummies(data.flatten()).to_numpy()
+
+    def random_mask(self):
         margin_left = self.margin
         margin_righ = self.margin
         margin_top = self.margin
@@ -54,10 +56,14 @@ class DatasetProcessor:
         return np.concatenate([self.size * i + np.arange(start_height, start_height + self.width_mask) for i in
                                np.arange(start_width, start_width + self.width_mask)], axis=0).astype(np.int32)
 
-    def data_with_mask_mnist(self, x):
+    def data_with_mask(self, x):
         for i in range(x.shape[0]):
-            mask = self.random_mask_mnist()
-            x[i, mask] = np.nan
+            mask = self.random_mask()
+            if self.dataset == 'svhn':
+                x = x.reshape(x.shape[0], 32 * 32, 3)
+                x[i, mask, :] = np.nan
+            else:
+                x[i, mask] = np.nan
         return x
 
     def divide_dataset_into_test_and_train(self, X):
@@ -74,4 +80,4 @@ class DatasetProcessor:
         return 1. - data_test, 1. - data_train
 
     def mask_data(self, data_test, data_train):
-        return self.data_with_mask_mnist(data_test), self.data_with_mask_mnist(data_train)
+        return self.data_with_mask(data_test), self.data_with_mask(data_train)
