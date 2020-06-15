@@ -179,6 +179,7 @@ class ClassificationFC:
             for epoch in range(1, n_epochs + 1):
                 n_batches = self.data_train.shape[0] // batch_size
                 l = np.inf
+                losses = []
                 for iteration in range(n_batches):
                     print("\r{}% ".format(100 * (iteration + 1) // n_batches), end="")
                     sys.stdout.flush()
@@ -190,9 +191,13 @@ class ClassificationFC:
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
                     _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
-                print("Train loss", l)
+                    losses.append(l)
 
-                train_loss.append(l)
+
+                t = sum(losses) / len(losses)
+                print("Train loss", t)
+
+                train_loss.append(t)
 
             test_loss = []
             for i in range(self.data_test.shape[0] // 2):
@@ -208,7 +213,7 @@ class ClassificationFC:
 
             print("Accuracy:", accuracy_op, "Train loss:", tl)
             test_loss.append(tl)
-        return accuracy_op, test_loss, train_loss
+        return accuracy_op, train_loss
 
 
 def run_model():
@@ -228,23 +233,18 @@ def run_model():
 
     params = [
         {'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0},
-                                        {'num_sample': 1, 'epoch': 100, 'gamma': 0.0, 'learning_rate': 0.003},
-                                        {'num_sample': 1, 'epoch': 100, 'gamma': 0.0, 'learning_rate': 0.01}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                            {'num_sample': 20, 'epoch': 100, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 1.0},
-                                            {'num_sample': 100, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5}]}
+                                        {'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.0},
+                                             {'num_sample': 10, 'epoch': 50, 'gamma': 1.0}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.0},
+                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.0}]},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0},
+                                            {'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 100, 'gamma': 1.0},
+                                                {'num_sample': 10, 'epoch': 50, 'gamma': 1.0}]}
 
     ]
-    f = open('loss_results_classification_fc_3', "a")
+    f = open('loss_results_classification_fc_epochs', "a")
     train_losses = []
     test_losses = []
     for eleme in params:
@@ -254,15 +254,13 @@ def run_model():
             a = ClassificationFC(p, data_test=data_test, data_train=data_train, data_imputed_train=data_imputed_train,
                                  data_imputed_test=data_imputed_test,
                                  gamma=param['gamma'], labels_train=labels_train, labels_test=labels_test)
-            accuracy, test_loss, train_loss = a.main_loop(param['epoch'])
+            accuracy, test_loss = a.main_loop(param['epoch'])
             test_losses.append(test_loss)
-            train_losses.append(train_loss)
             f.write(eleme['method'] + "," + str(param['num_sample']) + ','
                     + str(param['epoch']) + ',' + str(param['gamma']) + ',' + str(accuracy))
             f.write('\n')
             f.write('Test loss:' + str(test_loss))
             f.write('\n')
-            f.write('Train loss:' + str(train_loss))
             f.write('\n')
 
     f.close()

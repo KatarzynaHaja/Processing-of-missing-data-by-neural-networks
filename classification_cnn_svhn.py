@@ -112,7 +112,11 @@ class ClassificationCNN:
                                                      self.params.width * self.params.length * self.params.num_channels,
                                                      self.gamma)
 
-            conv_1 = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
+            self.samples = samples
+
+
+
+            conv_1 = self.sampling.nr(samples)
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
@@ -236,7 +240,7 @@ class ClassificationCNN:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
-                    _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
+                    _, l, y, samples = sess.run([optimizer, loss, y_pred, self.samples], feed_dict={self.X: batch_x, self.labels: labels})
                     losses.append(l)
 
                 t = sum(losses) / len(losses)
@@ -280,8 +284,8 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0},
-                                            {'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
+        # {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0},
+        #                                     {'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
         {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
                                              {'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
                                              {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},

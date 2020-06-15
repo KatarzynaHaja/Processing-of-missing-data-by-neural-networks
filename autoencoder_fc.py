@@ -167,7 +167,8 @@ class AutoencoderFC:
                     tf.add(tf.matmul(self.x_known, self.params.weights['encoder_h1']),
                            self.params.biases['encoder_b1']))
 
-                layer_1_miss = self.sampling.nr(samples)
+                layer_1_miss = self.sampling.nr(samples,self.params.weights['encoder_h1'],
+                                                self.params.biases['encoder_b1'])
                 layer_1_miss = tf.reshape(layer_1_miss, shape=(size[0], self.params.num_hidden_1))
 
                 layer_1 = tf.concat((layer_1_miss, layer_1), axis=0)
@@ -240,12 +241,13 @@ class AutoencoderFC:
         v = Visualizator(
             'result_' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
-
+        train_loss = []
         with tf.Session() as sess:
             sess.run(init)
             for epoch in range(1, n_epochs + 1):
                 n_batches = self.data_train.shape[0] // batch_size
                 l = np.inf
+                losses = []
                 for iteration in range(n_batches):
                     print("\r{}% ".format(100 * (iteration + 1) // n_batches), end="")
                     sys.stdout.flush()
@@ -256,6 +258,11 @@ class AutoencoderFC:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     _, l = sess.run([optimizer, loss], feed_dict={self.X: batch_x})
+                    losses.append(l)
+
+                test_l = sum(losses) / len(losses)
+                print("Train loss", test_l)
+                train_loss.append(test_l)
 
             test_loss = []
             if self.params.dataset == 'mnist':
@@ -266,27 +273,10 @@ class AutoencoderFC:
                         batch_x = self.data_imputed_test[(i * self.params.nn):((i + 1) * self.params.nn), :]
 
                     g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-                    for j in range(self.params.nn):
-                        v.draw_mnist_image(i, j, g, self.params.method)
-                    test_loss.append(l_test)
+                    # for j in range(self.params.nn):
+                    #     v.draw_mnist_image(i, j, g, self.params.method)
 
-            if self.params.dataset == 'svhn':
-                n = 16
-                for i in range(n):
-                    if self.params.method != 'imputation':
-                        batch_x = self.data_test[
-                                  (i * (self.data_test.shape[0]) // n):((i + 1) * (self.data_test.shape[0] // n)), :]
-                    else:
-                        batch_x = self.data_imputed_test[
-                                  (i * (self.data_test.shape[0] // n)):((i + 1) * (self.data_test.shape[0] // n)), :]
-
-                    g, l_test = sess.run([decoder_op, loss], feed_dict={self.X: batch_x})
-
-                    for j in range(self.data_test.shape[0] // n):
-                        v.draw_svhn_image(i, j, g, self.params.method)
-                    test_loss.append(l_test)
-
-        return np.mean(test_loss)
+        return train_loss, np.mean(test_loss)
 
 
 from sklearn.model_selection import ParameterGrid
@@ -300,13 +290,6 @@ def run_model(dataset):
         data_test = np.random.permutation(data_test)
         data_test, data_train = dataset_processor.change_background(data_test, data_train)
         data_test, data_train = dataset_processor.mask_data(data_test, data_train)
-
-    if dataset == 'svhn':
-        d = DatasetProcessor('svhn')
-        data_train, data_test, labels_train, labels_test = d.load_data()
-        data_train = d.reshape_data(data_train)
-        data_test = d.reshape_data(data_test)
-        data_train, data_test = d.mask_data(data_train, data_test)
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
     data_imputed_train = imp.fit_transform(data_train)
@@ -338,43 +321,44 @@ def run_the_best():
     data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
     data_test = np.random.permutation(data_test)
     data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('autoencoder_cnn/original_data', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('autoencoder_cnn/original_data', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
 
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    for j in range(1000):
-        _, ax = plt.subplots(1, 1, figsize=(1, 1))
-        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-        ax.axis('off')
-        plt.savefig(os.path.join('results_ac_fc/image_with_patch', "".join(
-            (str(j) + '.png'))),
-                    bbox_inches='tight')
-        plt.close()
+    # for j in range(1000):
+    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
+    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+    #     ax.axis('off')
+    #     plt.savefig(os.path.join('results_ac_fc/image_with_patch', "".join(
+    #         (str(j) + '.png'))),
+    #                 bbox_inches='tight')
+    #     plt.close()
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
     data_imputed_train = imp.fit_transform(data_train)
     data_imputed_test = imp.transform(data_test)
 
-    params = [{'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
-              {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 0.0},
-                                                  {'num_sample': 20, 'epoch': 150, 'gamma': 0.0},
-                                                  {'num_sample': 10, 'epoch': 150, 'gamma': 0.0},
-                                                  {'num_sample': 20, 'epoch': 150, 'gamma': 1.0}]},
+    params = [{'method': 'theirs', 'params': [{'num_sample': 1, 'epoch': 150, 'gamma': 0.0},
+                                              {'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]},
+              {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 1.0},
+                                                  {'num_sample': 10, 'epoch': 250, 'gamma': 1.0}]},
               {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 1.0},
-                                                   {'num_sample': 20, 'epoch': 150, 'gamma': 1.0}]},
-              {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 250, 'gamma': 2.0}]},
+                                                   {'num_sample': 10, 'epoch': 250, 'gamma': 1.0}]},
+              {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 150, 'gamma': 1.0},
+                                                      {'num_sample': 10, 'epoch': 250, 'gamma': 1.0}]},
 
-              {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 250, 'gamma': 0.0}]}
+              {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 150, 'gamma': 1.0},
+                                                  {'num_sample': 1, 'epoch': 250, 'gamma': 1.0}]},
 
               ]
-    f = open('loss_results_the_best', "a")
+    f = open('ac_fc_results', "a")
     for i in params:
         for params in i['params']:
             p = AutoencoderFCParams(method=i['method'], dataset='mnist', num_sample=params['num_sample'])
@@ -391,4 +375,3 @@ def run_the_best():
 
 
 run_the_best()
-

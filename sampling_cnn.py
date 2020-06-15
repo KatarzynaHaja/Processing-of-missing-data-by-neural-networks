@@ -83,7 +83,7 @@ class Sampling:
                               lambda: tf.concat((samples, sample), axis=0))
         return samples
 
-    def nr(self, output, output_dim):
+    def nr(self, output):
         reshaped_output = tf.reshape(output, shape=(
             self.size[0] * self.num_sample, self.params.width, self.params.length, self.params.num_channels))
         layer_1_m = tf.nn.relu(
