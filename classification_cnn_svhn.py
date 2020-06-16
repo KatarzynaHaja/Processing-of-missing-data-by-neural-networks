@@ -240,7 +240,7 @@ class ClassificationCNN:
                         batch_x = self.data_imputed_train[(iteration * batch_size):((iteration + 1) * batch_size), :]
 
                     labels = self.labels_train[iteration * batch_size: (iteration + 1) * batch_size, :]
-                    _, l, y, samples = sess.run([optimizer, loss, y_pred, self.samples], feed_dict={self.X: batch_x, self.labels: labels})
+                    _, l, y = sess.run([optimizer, loss, y_pred], feed_dict={self.X: batch_x, self.labels: labels})
                     losses.append(l)
 
                 t = sum(losses) / len(losses)
@@ -284,29 +284,13 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        # {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0},
-        #                                     {'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                             {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                             {'num_sample': 5, 'epoch': 50, 'gamma': 0.5},
-                                             {'num_sample': 5, 'epoch': 100, 'gamma': 0.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                            {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                            {'num_sample': 5, 'epoch': 50, 'gamma': 0.5},
-                                            {'num_sample': 5, 'epoch': 100, 'gamma': 0.5}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 1.5},
-                                                {'num_sample': 10, 'epoch': 100, 'gamma': 0.0},
-                                                {'num_sample': 5, 'epoch': 50, 'gamma': 0.5},
-                                                {'num_sample': 5, 'epoch': 100, 'gamma': 0.5}]},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
 
     ]
-    f = open('loss_results_classification_svhn', "a")
+    f = open('loss_results_classification_svhn_new', "a")
     for eleme in params:
         for param in eleme['params']:
             p = ClassificationCNNParams(method=eleme['method'], dataset='svhn', num_sample=param['num_sample'],

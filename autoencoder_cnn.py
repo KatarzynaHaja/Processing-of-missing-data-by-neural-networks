@@ -292,7 +292,7 @@ class AutoencoderCNN:
         init = tf.global_variables_initializer()
 
         v = Visualizator(
-            'result_cnn_5' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(
+            'result_cnn_new' + str(self.params.method) + '_' + str(n_epochs) + '_' + str(
                 self.params.num_sample) + '_' + str(
                 self.gamma_int), 'loss', 100)
         train_loss = []
@@ -352,7 +352,7 @@ def run_model():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('original_data_cnn_5', "".join(
+        plt.savefig(os.path.join('original_data_cnn_new', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
@@ -363,7 +363,7 @@ def run_model():
         _, ax = plt.subplots(1, 1, figsize=(1, 1))
         ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
         ax.axis('off')
-        plt.savefig(os.path.join('image_with_patch_cnn_5', "".join(
+        plt.savefig(os.path.join('image_with_patch_cnn_new', "".join(
             (str(j) + '.png'))),
                     bbox_inches='tight')
         plt.close()
@@ -374,18 +374,18 @@ def run_model():
     data_imputed_test = imp.transform(data_test)
 
     params = [
-        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.0}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 5, 'epoch': 100, 'gamma': 0.0},
+        {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 100, 'gamma': 0.5}]},
+        {'method': 'first_layer', 'params': [{'num_sample': 5, 'epoch': 100, 'gamma': 0.5},
                                              ]},
         {'method': 'last_layer', 'params': [
-                                            {'num_sample': 5, 'epoch': 100, 'gamma': 0.0},
+                                            {'num_sample': 5, 'epoch': 100, 'gamma': 0.5},
                                             ]},
         {'method': 'different_cost', 'params': [
-                                                {'num_sample': 5, 'epoch': 100, 'gamma': 0.0},
+                                                {'num_sample': 5, 'epoch': 100, 'gamma': 0.5},
                                                 ]}
 
     ]
-    f = open('loss_results_autoencoder_conv_5', "a")
+    f = open('loss_results_autoencoder_conv_new', "a")
     for eleme in params:
         for param in eleme['params']:
             p = AutoencoderCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'])

@@ -65,7 +65,7 @@ class Sampling:
         miss_mean = tf.where(where_isnan, component_means, self.x_miss)
 
         component_covs = tf.gather(covs, component)
-        miss_cov = tf.where(where_isnan, component_covs, self.x_miss)
+        miss_cov = tf.where(where_isnan, component_covs, tf.zeros([self.size[0], self.size[1]]))
 
         return miss_mean, miss_cov
 

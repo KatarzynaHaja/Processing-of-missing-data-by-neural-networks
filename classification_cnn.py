@@ -111,7 +111,7 @@ class ClassificationCNN:
                                                      self.params.width * self.params.length,
                                                      self.gamma)
 
-            conv_1 = self.sampling.nr(samples, self.params.conv_layer_1_filters[-1])
+            conv_1 = self.sampling.nr(samples)
 
         if self.params.method == 'imputation':
             conv_1 = tf.nn.relu(
@@ -146,7 +146,7 @@ class ClassificationCNN:
         # output : (?, 10)
         if self.params.method == 'last_layer':
             input = layer_fc_2[:self.size[0] * self.params.num_sample, :]
-            layer_fc_2 = self.sampling.mean_sample(input, [self.params.num_output])
+            layer_fc_2 = self.sampling.mean_sample(input, self.params.num_output)
         return layer_fc_2
 
     def main_loop(self, n_epochs):
@@ -253,19 +253,12 @@ def run_model():
 
     params = [
         {'method': 'imputation', 'params': [{'num_sample': 1, 'epoch': 50, 'gamma': 0.0}]},
-        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
-                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
-                                             {'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
-        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
-                                            {'num_sample': 10, 'epoch': 50, 'gamma': 1.5},
-                                            {'num_sample': 20, 'epoch': 50, 'gamma': 0.5},
-                                            {'num_sample': 100, 'epoch': 50, 'gamma': 1.0}]},
-        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5},
-                                                {'num_sample': 10, 'epoch': 50, 'gamma': 0.0},
-                                                {'num_sample': 10, 'epoch': 50, 'gamma': 1.5}]}
+        {'method': 'first_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'last_layer', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]},
+        {'method': 'different_cost', 'params': [{'num_sample': 10, 'epoch': 50, 'gamma': 0.5}]}
 
     ]
-    f = open('loss_results_classification_conv_25', "a")
+    f = open('loss_results_classification_conv_new', "a")
     for eleme in params:
         for param in eleme['params']:
             p = ClassificationCNNParams(method=eleme['method'], dataset='mnist', num_sample=param['num_sample'],
