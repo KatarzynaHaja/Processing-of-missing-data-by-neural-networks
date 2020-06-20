@@ -321,25 +321,25 @@ def run_the_best():
     data_test, data_train = dataset_processor.divide_dataset_into_test_and_train(X)
     data_test = np.random.permutation(data_test)
     data_test, data_train = dataset_processor.change_background(data_test, data_train)
-    # for j in range(1000):
-    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
-    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-    #     ax.axis('off')
-    #     plt.savefig(os.path.join('autoencoder_cnn/original_data', "".join(
-    #         (str(j) + '.png'))),
-    #                 bbox_inches='tight')
-    #     plt.close()
+    for j in range(1000):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+        ax.axis('off')
+        plt.savefig(os.path.join('autoencoder_cnn/original_data', "".join(
+            (str(j) + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
 
     data_test, data_train = dataset_processor.mask_data(data_test, data_train)
 
-    # for j in range(1000):
-    #     _, ax = plt.subplots(1, 1, figsize=(1, 1))
-    #     ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
-    #     ax.axis('off')
-    #     plt.savefig(os.path.join('results_ac_fc/image_with_patch', "".join(
-    #         (str(j) + '.png'))),
-    #                 bbox_inches='tight')
-    #     plt.close()
+    for j in range(1000):
+        _, ax = plt.subplots(1, 1, figsize=(1, 1))
+        ax.imshow(data_test[j].reshape([28, 28]), origin="upper", cmap="gray")
+        ax.axis('off')
+        plt.savefig(os.path.join('results_ac_fc/image_with_patch', "".join(
+            (str(j) + '.png'))),
+                    bbox_inches='tight')
+        plt.close()
 
     imp = Imputer(missing_values="NaN", strategy="mean", axis=0)
     data_imputed_train = imp.fit_transform(data_train)
